@@ -1,0 +1,10 @@
+{
+  "name": "@vtomnet/cua-frontend-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {},
+  "dependencies": {
+    "@vtomnet/cua-core": "workspace:*",
+    "@vtomnet/cua-frontend-shared": "workspace:*"
+  }
+}

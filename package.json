@@ -1,0 +1,12 @@
+{
+  "name": "cua",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "bun --filter @vtomnet/cua-frontend-web dev",
+    "dev:native": "bun --filter @vtomnet/cua-frontend-native dev",
+    "dev": "bun run dev:${TARGET-web}"
+  }
+}

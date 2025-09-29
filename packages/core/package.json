@@ -1,0 +1,12 @@
+{
+  "name": "@vtomnet/cua-core",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "private": true,
+  "scripts": {
+    "build": "bun build ./src/index.js --outdir dist"
+  },
+  "dependencies": {
+    "onnxruntime-web": "^1.23.0"
+  }
+}
