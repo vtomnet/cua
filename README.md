@@ -1,7 +1,7 @@
 # Computer Use Agent
 
 This program targets both web and native (via Tauri).
-To build for web, you will need [Bun](https://bun.com) (npm may work too).
+To build for web, you will need [Bun](https://bun.com).
 To build for native, you will additionally need [Rust](https://rust-lang.org).
 
 ## init
