@@ -8,6 +8,7 @@
     "dev": "tauri dev"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.8.0",
     "@vtomnet/cua-core": "workspace:*",
     "@vtomnet/cua-frontend-shared": "workspace:*"
   },
