@@ -13,18 +13,8 @@ bun add
 ## run
 
 ```bash
-bun run dev:web        # or:
-bun run dev:native     # or:
-TARGET=native bun dev  # or TARGET=web
-```
-
-## index
-
-```
-core              Turn detection, ASR, LLMs. Audio + face landmarks in, ui actions out.
-server            WebRTC server, counterpart to frontend-{web,native}. Builds on 'core'.
-frontend-core     Mediapipe, Silero VAD via ORT, maybe audio/camera recording routines.
-frontend-web      Builds on frontend-core, includes VNC and maybe a Linux VM runner.
-frontend-native   Tauri program, otherwise builds on frontend-core. + UI automation.
-frontend-local    Like frontend-web, but no server dependency. Builds on 'core'.
+bun run dev:web     # or:
+bun run dev:native  # or:
+bun run dev:local   # or:
+TARGET=web bun dev  # TARGET={web,native,local}
 ```
