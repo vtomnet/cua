@@ -6,33 +6,45 @@
     },
     "packages/core": {
       "name": "@vtomnet/cua-core",
-      "version": "0.1.0",
+      "version": "0.0.1",
       "dependencies": {
         "onnxruntime-web": "^1.23.0",
       },
     },
+    "packages/frontend-core": {
+      "name": "@vtomnet/cua-frontend-core",
+      "version": "0.0.1",
+    },
+    "packages/frontend-local": {
+      "name": "@vtomnet/cua-frontend-local",
+      "version": "0.0.1",
+      "dependencies": {
+        "@vtomnet/cua-frontend-core": "workspace:*",
+      },
+    },
     "packages/frontend-native": {
       "name": "@vtomnet/cua-frontend-native",
-      "version": "0.1.0",
+      "version": "0.0.1",
       "dependencies": {
         "@tauri-apps/api": "^2.8.0",
-        "@vtomnet/cua-core": "workspace:*",
-        "@vtomnet/cua-frontend-shared": "workspace:*",
+        "@vtomnet/cua-frontend-core": "workspace:*",
       },
       "devDependencies": {
         "@tauri-apps/cli": "^2",
       },
     },
-    "packages/frontend-shared": {
-      "name": "@vtomnet/cua-frontend-shared",
-      "version": "0.1.0",
-    },
     "packages/frontend-web": {
       "name": "@vtomnet/cua-frontend-web",
-      "version": "0.1.0",
+      "version": "0.0.1",
+      "dependencies": {
+        "@vtomnet/cua-frontend-core": "workspace:*",
+      },
+    },
+    "packages/server": {
+      "name": "@vtomnet/cua-server",
+      "version": "0.0.1",
       "dependencies": {
         "@vtomnet/cua-core": "workspace:*",
-        "@vtomnet/cua-frontend-shared": "workspace:*",
       },
     },
   },
@@ -87,11 +99,15 @@
 
     "@vtomnet/cua-core": ["@vtomnet/cua-core@workspace:packages/core"],
 
+    "@vtomnet/cua-frontend-core": ["@vtomnet/cua-frontend-core@workspace:packages/frontend-core"],
+
+    "@vtomnet/cua-frontend-local": ["@vtomnet/cua-frontend-local@workspace:packages/frontend-local"],
+
     "@vtomnet/cua-frontend-native": ["@vtomnet/cua-frontend-native@workspace:packages/frontend-native"],
 
-    "@vtomnet/cua-frontend-shared": ["@vtomnet/cua-frontend-shared@workspace:packages/frontend-shared"],
-
     "@vtomnet/cua-frontend-web": ["@vtomnet/cua-frontend-web@workspace:packages/frontend-web"],
+
+    "@vtomnet/cua-server": ["@vtomnet/cua-server@workspace:packages/server"],
 
     "flatbuffers": ["flatbuffers@25.9.23", "", {}, "sha512-MI1qs7Lo4Syw0EOzUl0xjs2lsoeqFku44KpngfIduHBYvzm8h2+7K8YMQh1JtVVVrUvhLpNwqVi4DERegUJhPQ=="],
 

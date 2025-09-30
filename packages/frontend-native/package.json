@@ -1,7 +1,7 @@
 {
   "name": "@vtomnet/cua-frontend-native",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "tauri": "tauri",
@@ -9,8 +9,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
-    "@vtomnet/cua-core": "workspace:*",
-    "@vtomnet/cua-frontend-shared": "workspace:*"
+    "@vtomnet/cua-frontend-core": "workspace:*"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
