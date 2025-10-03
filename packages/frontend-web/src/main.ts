@@ -25,6 +25,64 @@ export class Timestamp {
   }
 }
 
+// Ring buffer for audio data to prevent losing first bit of speech
+export class RingBuffer {
+  private buffer: Float32Array;
+  private writeIndex: number;
+  private size: number;
+  private isFull: boolean;
+
+  constructor(sizeInSamples: number) {
+    this.size = sizeInSamples;
+    this.buffer = new Float32Array(sizeInSamples);
+    this.writeIndex = 0;
+    this.isFull = false;
+  }
+
+  // Add audio data to the ring buffer
+  write(data: Float32Array): void {
+    for (let i = 0; i < data.length; i++) {
+      this.buffer[this.writeIndex] = data[i];
+      this.writeIndex = (this.writeIndex + 1) % this.size;
+
+      // Mark as full when we've written enough data to fill the buffer once
+      if (this.writeIndex === 0) {
+        this.isFull = true;
+      }
+    }
+  }
+
+  // Get all buffered data in the correct order
+  read(): Float32Array {
+    if (!this.isFull) {
+      // If buffer isn't full yet, return data from start to writeIndex
+      return this.buffer.slice(0, this.writeIndex);
+    }
+
+    // If buffer is full, return data in correct chronological order
+    const result = new Float32Array(this.size);
+    const firstPart = this.buffer.slice(this.writeIndex);
+    const secondPart = this.buffer.slice(0, this.writeIndex);
+
+    result.set(firstPart, 0);
+    result.set(secondPart, firstPart.length);
+
+    return result;
+  }
+
+  // Get the current amount of data stored
+  getStoredSamples(): number {
+    return this.isFull ? this.size : this.writeIndex;
+  }
+
+  // Clear the buffer
+  clear(): void {
+    this.buffer.fill(0);
+    this.writeIndex = 0;
+    this.isFull = false;
+  }
+}
+
 // VadIterator class
 export class VadIterator {
   private sampleRate: number;
@@ -375,6 +433,7 @@ export class OpenAIRealtime {
     this.apiKey = apiKey;
     this.model = model;
     this.tools = [{
+      // TODO: "new window" bool option, akin to open(1) cli util
       type: "function",
       name: "open",
       description: "Open a given URL, application, or file.",
@@ -526,7 +585,7 @@ export class OpenAIRealtime {
             this.ws!.removeEventListener('message', messageHandler);
             this.messages.push(...data.response.output);
             this.executeTools(data.response);
-            return data;
+            resolve(data);
           } else if (data.type === "error") {
             this.ws!.removeEventListener('message', messageHandler);
             reject(new Error(`OpenAI API error: ${data.error?.message || 'Unknown error'}`));
@@ -566,7 +625,7 @@ export class OpenAIRealtime {
             break;
           case "scroll":
             console.log(`TOOL: scroll(${JSON.stringify(args)})`);
-            toolOutput = `Scrolled`;
+            toolOutput = `Scrolled.`; // TODO later, determine whether the page actually scrolled and inform the LLM of that.
             break;
           case "keys":
             console.log(`TOOL: keys(${JSON.stringify(args)})`);
@@ -607,7 +666,7 @@ let currentSpeechBuffer: Float32Array[] = [];
 let speechStartTime = 0;
 let silenceTimeout: NodeJS.Timeout | null = null;
 let currentTranscription = "";
-let messages: Array<any> = [];
+let ringBuffer: RingBuffer | null = null;
 
 // Update status display
 function updateStatus(msg: string, className = '') {
@@ -652,7 +711,25 @@ function displayTranscription(transcription: string, timestamp: number) {
 function displayOpenAIResponse(response: any, timestamp: number) {
   if (!transcriptionsDiv) return;
 
-  const responseText = response;
+  let responseText = "";
+  for (const item of response.response.output) {
+    switch (item.type) {
+      case "message":
+        const content = item.content.map((x: any) => x.text).join(' ');
+        responseText += content;
+        break;
+      case "function_call":
+        const functionMsg = `Called ${item.name}`;
+        responseText += "\n" + functionMsg;
+        break;
+      case "function_call_output":
+        const outputMsg = `${item.name} finished`;
+        responseText += "\n" + outputMsg;
+        break;
+      default:
+        console.log(`Unhandled item type: ${item.type}`);
+    }
+  }
   // const responseText = JSON.parse(response).response.output[0].content[0].text;
   const timeStr = new Date(timestamp).toLocaleTimeString();
   const responseElement = document.createElement('div');
@@ -718,10 +795,10 @@ let silenceCounter = 0;
 const SILENCE_THRESHOLD = 10; // chunks of silence to detect speech end
 
 async function processAudioChunk(audioChunk: Float32Array) {
-  if (!vad) return;
+  if (!vad || !ringBuffer) return;
 
-  // Add chunk to current speech buffer
-  currentSpeechBuffer.push(audioChunk);
+  // Always write incoming audio to the ring buffer
+  ringBuffer.write(audioChunk);
 
   // Process chunk with VAD to detect speech activity
   try {
@@ -739,28 +816,37 @@ async function processAudioChunk(audioChunk: Float32Array) {
     const hasCurrentSpeech = vad.triggered;
 
     if (hasCurrentSpeech && !speechStarted) {
-      // Speech started
+      // Speech started - include buffered audio to prevent losing first bit of speech
       speechStarted = true;
       silenceCounter = 0;
       speechStartTime = Date.now();
-    } else if (!hasCurrentSpeech && speechStarted) {
-      // Potential speech end, count silence
-      silenceCounter++;
 
-      if (silenceCounter >= SILENCE_THRESHOLD) {
-        // Speech ended, transcribe the current buffer
-        const currentAudio = combineAudioChunks(currentSpeechBuffer);
-        if (currentAudio.length > 0) {
-          await transcribeSpeech(currentAudio);
-          currentSpeechBuffer = [];
-          lastTranscriptionTime = Date.now();
+      // Get pre-speech audio from ring buffer and start current speech buffer
+      const bufferedAudio = ringBuffer.read();
+      currentSpeechBuffer = [bufferedAudio, audioChunk];
+    } else if (speechStarted) {
+      // Speech is ongoing - add chunk to current speech buffer
+      currentSpeechBuffer.push(audioChunk);
+
+      if (!hasCurrentSpeech) {
+        // Potential speech end, count silence
+        silenceCounter++;
+
+        if (silenceCounter >= SILENCE_THRESHOLD) {
+          // Speech ended, transcribe the current buffer
+          const currentAudio = combineAudioChunks(currentSpeechBuffer);
+          if (currentAudio.length > 0) {
+            await transcribeSpeech(currentAudio);
+            currentSpeechBuffer = [];
+            lastTranscriptionTime = Date.now();
+          }
+          speechStarted = false;
+          silenceCounter = 0;
         }
-        speechStarted = false;
+      } else {
+        // Reset silence counter if speech continues
         silenceCounter = 0;
       }
-    } else if (hasCurrentSpeech) {
-      // Reset silence counter if speech continues
-      silenceCounter = 0;
     }
 
     // Check for 5-second interval transcription
@@ -869,6 +955,9 @@ async function startRecording() {
     speechStarted = false;
     silenceCounter = 0;
 
+    // Initialize ring buffer to store 1 second of audio (16000 samples at 16kHz)
+    ringBuffer = new RingBuffer(16000);
+
     updateStatus('Recording... Speak into your microphone', 'recording');
 
   } catch (error) {
@@ -900,6 +989,12 @@ async function stopRecording() {
   // Stop audio context
   await audioContext.close();
   audioContext = null;
+
+  // Clear ring buffer
+  if (ringBuffer) {
+    ringBuffer.clear();
+    ringBuffer = null;
+  }
 
   if (recordedChunks.length === 0) {
     updateStatus('No audio recorded', 'error');
