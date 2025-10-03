@@ -35,6 +35,13 @@
   let lastRequestTimestamp = 0;
   let lastUserSpeechTime = 0;
   let lastTranscribedAudioLength = 0;
+  // Minimum samples required before attempting a Moonshine transcription.
+  // Prevents tiny slices (e.g. length 1) that cause ONNX shape errors.
+  const MIN_TRANSCRIBE_SAMPLES = 256; // ~16ms at 16kHz
+  // Guard to prevent overlapping ASR transcriptions (duplicates/races)
+  let isTranscribing = false;
+  type TranscriptionJob = { data: Float32Array; reason: 'speech_end' | 'timer' };
+  let transcriptionQueue: TranscriptionJob[] = [];
 
   // Update status display
   function updateStatus(msg: string, className = '') {
@@ -175,14 +182,17 @@
               const targetLength = currentAudio.length;
               const newAudio = currentAudio.slice(previousLength);
               if (newAudio.length > 0) {
+              // Skip if too small to transcribe yet; wait for more audio
+              if (newAudio.length >= MIN_TRANSCRIBE_SAMPLES) {
                 lastTranscribedAudioLength = targetLength;
                 try {
-                  await transcribeSpeechLocal(newAudio);
+                  await transcribeSpeechLocal(newAudio, 'speech_end');
                 } catch (e) {
                   // Roll back so audio can be retried on failure
                   lastTranscribedAudioLength = previousLength;
                   throw e;
                 }
+              }
               }
             }
             // Reset for next speech segment
@@ -209,12 +219,14 @@
             const targetLength = currentAudio.length;
             const newAudio = currentAudio.slice(previousLength);
             if (newAudio.length > 0) {
-              lastTranscribedAudioLength = targetLength;
-              try {
-                await transcribeSpeechLocal(newAudio);
-              } catch (e) {
-                lastTranscribedAudioLength = previousLength;
-                throw e;
+              if (newAudio.length >= MIN_TRANSCRIBE_SAMPLES) {
+                lastTranscribedAudioLength = targetLength;
+                try {
+                  await transcribeSpeechLocal(newAudio, 'timer');
+                } catch (e) {
+                  lastTranscribedAudioLength = previousLength;
+                  throw e;
+                }
               }
               lastTranscriptionTime = now;
             }
@@ -243,47 +255,72 @@
   }
 
   // Handle transcription for speech segment with turn detection
-  async function transcribeSpeechLocal(audioData: Float32Array) {
+  async function transcribeSpeechLocal(audioData: Float32Array, reason: 'speech_end' | 'timer') {
     if (!moonshine || !smartTurn) return;
 
-    try {
-      const transcription = await moonshine.generate(audioData);
-      if (transcription.trim()) {
-        displayTranscription(transcription.trim(), Date.now());
+    // Queue if a transcription is already in progress
+    if (isTranscribing) {
+      transcriptionQueue.push({ data: audioData, reason });
+      return;
+    }
 
-        // Accumulate transcription for turn detection
-        pendingTranscription += (pendingTranscription ? ' ' : '') + transcription.trim();
+    isTranscribing = true;
 
-        // Add audio to turn detection buffer
-        turnDetectionBuffer.push(audioData);
+    const processOne = async (data: Float32Array, why: 'speech_end' | 'timer') => {
+      try {
+        const transcription = await moonshine!.generate(data);
+        if (transcription.trim()) {
+          displayTranscription(transcription.trim(), Date.now());
 
-        // Keep only last 8 seconds of audio for turn detection (16000 samples per second)
-        const maxSamples = 8 * 16000;
-        let totalSamples = turnDetectionBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
+          // Accumulate transcription for turn detection
+          pendingTranscription += (pendingTranscription ? ' ' : '') + transcription.trim();
 
-        while (totalSamples > maxSamples && turnDetectionBuffer.length > 1) {
-          const removed = turnDetectionBuffer.shift();
-          if (removed) totalSamples -= removed.length;
-        }
+          // Always accumulate audio for turn detection so we have the full window
+          turnDetectionBuffer.push(data);
 
-        // Check for turn completion using Smart Turn v3
-        const combinedAudio = combineAudioChunksLocal(turnDetectionBuffer);
-        const turnResult = await smartTurn.predictEndpoint(combinedAudio);
+          // Keep only last 8 seconds of audio for turn detection (16000 samples per second)
+          const maxSamples = 8 * 16000;
+          let totalSamples = turnDetectionBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
+          while (totalSamples > maxSamples && turnDetectionBuffer.length > 1) {
+            const removed = turnDetectionBuffer.shift();
+            if (removed) totalSamples -= removed.length;
+          }
 
-        console.log(`Turn detection: prediction=${turnResult.prediction}, probability=${turnResult.probability.toFixed(3)}`);
-
-        if (turnResult.prediction === 1) {
-          // Turn is complete, send to OpenAI
-          if (pendingTranscription.trim() && !isProcessingOpenAI) {
-            const transcriptionToSend = pendingTranscription.trim();
-            pendingTranscription = ""; // Clear immediately to prevent duplicates
-            await sendToOpenAI(transcriptionToSend);
-            turnDetectionBuffer = [];
+          // Only run endpoint detection (and thus send to OpenAI) on explicit speech-end events
+          if (why === 'speech_end') {
+            const combinedAudio = combineAudioChunksLocal(turnDetectionBuffer);
+            const turnResult = await smartTurn!.predictEndpoint(combinedAudio);
+            console.log(`Turn detection (reason=${why}): prediction=${turnResult.prediction}, probability=${turnResult.probability.toFixed(3)}`);
+            if (turnResult.prediction === 1) {
+              if (pendingTranscription.trim() && !isProcessingOpenAI) {
+                const transcriptionToSend = pendingTranscription.trim();
+                pendingTranscription = ""; // Clear immediately to prevent duplicates
+                await sendToOpenAI(transcriptionToSend);
+                turnDetectionBuffer = [];
+              }
+            }
+          } else {
+            // For timer-based partials, we explicitly skip endpoint decision
+            console.log('Timer-based transcription buffered (no endpoint check)');
           }
         }
+      } catch (error) {
+        console.error('Error transcribing speech or detecting turn:', error);
       }
-    } catch (error) {
-      console.error('Error transcribing speech or detecting turn:', error);
+    };
+
+    try {
+      // Process initial audio
+      await processOne(audioData, reason);
+      // Drain queue sequentially
+      while (transcriptionQueue.length > 0) {
+        const next = transcriptionQueue.shift();
+        if (next) {
+          await processOne(next.data, next.reason);
+        }
+      }
+    } finally {
+      isTranscribing = false;
     }
   }
 
