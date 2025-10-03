@@ -1,17 +1,10 @@
 {
   "name": "frontend-native",
-  "private": true,
   "version": "0.0.1",
-  "type": "module",
-  "scripts": {
-    "tauri": "tauri",
-    "dev": "tauri dev"
-  },
   "dependencies": {
-    "@tauri-apps/api": "^2.8.0",
     "frontend-core": "workspace:*"
   },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2"
-  }
+  "private": true,
+  "scripts": {},
+  "type": "module"
 }
