@@ -3,11 +3,10 @@
   import {
     VadIterator,
     SmartTurnV3,
-    Moonshine,
+    OpenAIRealtimeTranscription,
     OpenAIRealtime,
     RingBuffer,
     Timestamp,
-    combineAudioChunks
   } from './main';
 
   // Application state
@@ -20,7 +19,7 @@
 
   // Global instances (will be available from main.ts)
   let vad: VadIterator | null = null;
-  let moonshine: Moonshine | null = null;
+  let openaiTranscription: OpenAIRealtimeTranscription | null = null;
   let openaiRealtime: OpenAIRealtime | null = null;
   let smartTurn: SmartTurnV3 | null = null;
   let audioContext: AudioContext | null = null;
@@ -35,9 +34,9 @@
   let lastRequestTimestamp = 0;
   let lastUserSpeechTime = 0;
   let lastTranscribedAudioLength = 0;
-  // Minimum samples required before attempting a Moonshine transcription.
-  // Prevents tiny slices (e.g. length 1) that cause ONNX shape errors.
-  const MIN_TRANSCRIBE_SAMPLES = 256; // ~16ms at 16kHz
+  // Minimum samples required before attempting transcription.
+  // OpenAI requires at least 100ms of audio at 24kHz, which equals ~100ms at 16kHz too
+  const MIN_TRANSCRIBE_SAMPLES = Math.ceil(16000 * 0.1); // 100ms at 16kHz = 1600 samples
   // Guard to prevent overlapping ASR transcriptions (duplicates/races)
   let isTranscribing = false;
   type TranscriptionJob = { data: Float32Array; reason: 'speech_end' | 'timer' };
@@ -254,9 +253,30 @@
     return combined;
   }
 
+  // Helper function to resample audio from 16kHz to 24kHz for OpenAI
+  function resample16to24(input: Float32Array): Float32Array {
+    const inputSampleRate = 16000;
+    const outputSampleRate = 24000;
+    const ratio = outputSampleRate / inputSampleRate; // 1.5
+    const outputLength = Math.floor(input.length * ratio);
+    const output = new Float32Array(outputLength);
+
+    for (let i = 0; i < outputLength; i++) {
+      const inputIndex = i / ratio;
+      const inputIndexFloor = Math.floor(inputIndex);
+      const inputIndexCeil = Math.min(inputIndexFloor + 1, input.length - 1);
+      const fraction = inputIndex - inputIndexFloor;
+
+      // Linear interpolation
+      output[i] = input[inputIndexFloor] * (1 - fraction) + input[inputIndexCeil] * fraction;
+    }
+
+    return output;
+  }
+
   // Handle transcription for speech segment with turn detection
   async function transcribeSpeechLocal(audioData: Float32Array, reason: 'speech_end' | 'timer') {
-    if (!moonshine || !smartTurn) return;
+    if (!openaiTranscription || !smartTurn) return;
 
     // Queue if a transcription is already in progress
     if (isTranscribing) {
@@ -268,7 +288,9 @@
 
     const processOne = async (data: Float32Array, why: 'speech_end' | 'timer') => {
       try {
-        const transcription = await moonshine!.generate(data);
+        // Resample audio from 16kHz to 24kHz for OpenAI
+        const resampledData = resample16to24(data);
+        const transcription = await openaiTranscription!.transcribe(resampledData);
         if (transcription.trim()) {
           displayTranscription(transcription.trim(), Date.now());
 
@@ -336,14 +358,15 @@
       await smartTurn.init();
       updateStatus('Smart Turn v3 loaded, loading ASR...', 'loading');
 
-      moonshine = new Moonshine("moonshine-base");
-      await moonshine.loadModel();
-      updateStatus('ASR loaded, connecting to OpenAI...', 'loading');
-
       const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
       if (!apiKey) {
         throw new Error('VITE_OPENAI_API_KEY not found in environment variables');
       }
+
+      // Initialize OpenAI transcription (uses 24kHz but we'll resample if needed)
+      openaiTranscription = new OpenAIRealtimeTranscription(apiKey, 24000);
+      await openaiTranscription.init();
+      updateStatus('OpenAI Transcription loaded, connecting to OpenAI chat...', 'loading');
 
       openaiRealtime = new OpenAIRealtime(apiKey);
       await openaiRealtime.connect();
@@ -415,7 +438,7 @@
       const source = audioContext.createMediaStreamSource(stream);
 
       // Initialize models if not already done
-      if (!vad || !moonshine) {
+      if (!vad || !openaiTranscription) {
         const initialized = await initializeModelsLocal();
         if (!initialized) return;
       }
@@ -579,6 +602,6 @@
   </div>
 
   <div class="mt-8 p-4 text-sm text-gray-500 bg-gray-50 rounded-md border border-gray-200">
-    Click "Start Recording" to begin recording from your microphone. The system will detect speech segments using VAD and transcribe them using Moonshine ASR on speech end or every 5 seconds.
+    Click "Start Recording" to begin recording from your microphone. The system will detect speech segments using VAD and transcribe them using OpenAI Realtime API on speech end or every 5 seconds.
   </div>
 </main>
