@@ -1,10 +1,16 @@
 {
   "name": "frontend-native",
   "version": "0.0.1",
-  "dependencies": {
-    "frontend-core": "workspace:*"
+  "scripts": {
+    "dev": "electrobun dev",
+    "build": "electrobun build",
+    "start": "bun run build && bun run dev"
   },
-  "private": true,
-  "scripts": {},
-  "type": "module"
+  "dependencies": {
+    "frontend-core": "workspace:*",
+    "electrobun": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
 }
