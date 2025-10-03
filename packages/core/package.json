@@ -1,13 +1,17 @@
 {
-  "name": "@vtomnet/cua-core",
+  "name": "core",
   "version": "0.0.1",
   "type": "module",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "private": true,
   "scripts": {
-    "build": "bun build ./src/index.js --outdir dist"
+    "build": "tsc -b"
   },
   "dependencies": {
     "onnxruntime-web": "^1.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   }
 }

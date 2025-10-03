@@ -1,7 +1,14 @@
 {
-  "name": "@vtomnet/cua-frontend-core",
+  "name": "frontend-core",
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "scripts": {}
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "core": "workspace:*"
+  }
 }
