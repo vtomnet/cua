@@ -133,11 +133,16 @@
 
   async function processAudioChunkLocal(audioChunk: Float32Array) {
     if (!vad || !ringBuffer) return;
+    // We want to capture a small amount of pre-speech audio that occurs
+    // just before VAD.triggered flips to true. To do that we snapshot
+    // the ring buffer BEFORE writing the current chunk. If this chunk
+    // is the one that triggers speech, we then append the chunk after
+    // the pre-speech audio snapshot so we don't lose the leading edge.
+    const preChunkBufferedAudio = ringBuffer.read();
 
-    // Process chunk with VAD to detect speech activity
     try {
-      // Use a sliding window approach for real-time detection
-      const windowSize = 512; // Match VAD window size
+      // Run VAD on the chunk (window size matches worklet buffer size)
+      const windowSize = 512;
       for (let i = 0; i < audioChunk.length; i += windowSize) {
         const chunk = audioChunk.slice(i, Math.min(i + windowSize, audioChunk.length));
         if (chunk.length === windowSize) {
@@ -145,93 +150,80 @@
         }
       }
 
-      // Check VAD state for speech activity
       const hasCurrentSpeech = vad.triggered;
 
-      // Always write incoming audio to the ring buffer after VAD processing
-      // This ensures the ring buffer contains the chunk that triggered speech detection
-      ringBuffer.write(audioChunk);
-
       if (hasCurrentSpeech && !speechStarted) {
-        // Speech started - include buffered audio to prevent losing first bit of speech
+        // Rising edge of speech detection: start a new speech buffer.
+        // Use the snapshot taken BEFORE writing this chunk so we include
+        // the preceding context (potentially early speech not yet over threshold).
         speechStarted = true;
         silenceCounter = 0;
-        lastUserSpeechTime = Date.now(); // Track when user starts speaking
-        lastTranscribedAudioLength = 0; // Reset for new speech segment
+        lastUserSpeechTime = Date.now();
+        lastTranscribedAudioLength = 0;
 
-        // Get pre-speech audio from ring buffer and start current speech buffer
-        const bufferedAudio = ringBuffer.read();
-        currentSpeechBuffer = [bufferedAudio, audioChunk];
+        currentSpeechBuffer = [];
+        if (preChunkBufferedAudio.length > 0) {
+          currentSpeechBuffer.push(preChunkBufferedAudio);
+        }
+        currentSpeechBuffer.push(audioChunk);
       } else if (speechStarted) {
-        // Speech is ongoing - add chunk to current speech buffer
+        // Ongoing speech
         currentSpeechBuffer.push(audioChunk);
 
         if (!hasCurrentSpeech) {
-          // Potential speech end, count silence
+          // Potential end-of-speech: count silent chunks
           silenceCounter++;
-
           if (silenceCounter >= SILENCE_THRESHOLD) {
-            // Speech ended, transcribe the current buffer
             const currentAudio = combineAudioChunksLocal(currentSpeechBuffer);
             if (currentAudio.length > 0 && currentAudio.length > lastTranscribedAudioLength) {
-              // Only transcribe new audio that hasn't been transcribed yet.
-              // Advance lastTranscribedAudioLength BEFORE awaiting to avoid race where
-              // overlapping processAudioChunkLocal calls resend the same slice.
               const previousLength = lastTranscribedAudioLength;
               const targetLength = currentAudio.length;
               const newAudio = currentAudio.slice(previousLength);
-              if (newAudio.length > 0) {
-              // Skip if too small to transcribe yet; wait for more audio
               if (newAudio.length >= MIN_TRANSCRIBE_SAMPLES) {
                 lastTranscribedAudioLength = targetLength;
                 try {
                   await transcribeSpeechLocal(newAudio, 'speech_end');
                 } catch (e) {
-                  // Roll back so audio can be retried on failure
                   lastTranscribedAudioLength = previousLength;
                   throw e;
                 }
               }
-              }
             }
-            // Reset for next speech segment
             currentSpeechBuffer = [];
-            // Don't reset lastTranscribedAudioLength here - keep it to prevent duplicate transcriptions
             lastTranscriptionTime = Date.now();
             speechStarted = false;
             silenceCounter = 0;
           }
         } else {
-          // Reset silence counter if speech continues
-          silenceCounter = 0;
+          // Speech continues; reset silence counter
+            silenceCounter = 0;
         }
       }
 
-      // Check for 5-second interval transcription
+      // Periodic (timer) partial transcription every 5 seconds of ongoing speech
       const now = Date.now();
       if (now - lastTranscriptionTime >= 5000 && currentSpeechBuffer.length > 0) {
-        // Check if there's ongoing speech to transcribe
         const currentAudio = combineAudioChunksLocal(currentSpeechBuffer);
         if (currentAudio.length > lastTranscribedAudioLength) {
-          // Advance pointer before awaiting to avoid duplicate slices
-            const previousLength = lastTranscribedAudioLength;
-            const targetLength = currentAudio.length;
-            const newAudio = currentAudio.slice(previousLength);
-            if (newAudio.length > 0) {
-              if (newAudio.length >= MIN_TRANSCRIBE_SAMPLES) {
-                lastTranscribedAudioLength = targetLength;
-                try {
-                  await transcribeSpeechLocal(newAudio, 'timer');
-                } catch (e) {
-                  lastTranscribedAudioLength = previousLength;
-                  throw e;
-                }
-              }
-              lastTranscriptionTime = now;
+          const previousLength = lastTranscribedAudioLength;
+          const targetLength = currentAudio.length;
+          const newAudio = currentAudio.slice(previousLength);
+          if (newAudio.length >= MIN_TRANSCRIBE_SAMPLES) {
+            lastTranscribedAudioLength = targetLength;
+            try {
+              await transcribeSpeechLocal(newAudio, 'timer');
+            } catch (e) {
+              lastTranscribedAudioLength = previousLength;
+              throw e;
             }
+          }
+          lastTranscriptionTime = now;
         }
       }
 
+      // Finally write the current chunk into the ring buffer so it is available
+      // as pre-speech context for the NEXT chunk if needed.
+      ringBuffer.write(audioChunk);
     } catch (error) {
       console.error('Error processing audio chunk:', error);
     }
