@@ -1,5 +1,9 @@
 import * as ort from "onnxruntime-web";
 import llamaTokenizer from 'llama-tokenizer-js';
+import { WhisperFeatureExtractor } from 'whisper-feature-extractor';
+import { mount } from "svelte";
+import "./app.css";
+import App from "./App.svelte";
 
 // Utility: load WAV file (16kHz mono PCM) into Float32Array
 export async function loadWavFile(url: string): Promise<Float32Array> {
@@ -112,7 +116,6 @@ export class VadIterator {
 
   private modelPath: string;
   private session: ort.InferenceSession | null;
-  private initialized: boolean;
 
   public triggered: boolean;
 
@@ -154,14 +157,12 @@ export class VadIterator {
 
     this.modelPath = modelPath;
     this.session = null;
-    this.initialized = false;
   }
 
   async init(): Promise<void> {
     this.session = await ort.InferenceSession.create(this.modelPath, {
       executionProviders: ["wasm"], // or "webgl"
     });
-    this.initialized = true;
   }
 
   reset(): void {
@@ -264,6 +265,105 @@ export class VadIterator {
   }
 }
 
+// Smart Turn v3 class for turn detection
+export class SmartTurnV3 {
+  private modelPath: string;
+  private session: ort.InferenceSession | null = null;
+  private featureExtractor: WhisperFeatureExtractor;
+  private sampleRate: number;
+  private nSeconds: number;
+  private initialized: boolean = false;
+
+  constructor(
+    modelPath = "/models/smart-turn-v3.0.onnx",
+    chunkLength = 8,
+    sampleRate = 16000,
+    nSeconds = 8
+  ) {
+    this.modelPath = modelPath;
+    this.sampleRate = sampleRate;
+    this.nSeconds = nSeconds;
+    this.featureExtractor = new WhisperFeatureExtractor({ chunkLength: chunkLength });
+  }
+
+  async init(): Promise<void> {
+    try {
+      this.session = await ort.InferenceSession.create(this.modelPath, {
+        executionProviders: ["wasm"]
+      });
+      this.initialized = true;
+    } catch (error) {
+      console.error("Failed to initialize Smart Turn v3 model:", error);
+      throw error;
+    }
+  }
+
+  private truncateAudioToLastNSeconds(audioArray: Float32Array): Float32Array {
+    const targetSamples = this.nSeconds * this.sampleRate;
+
+    if (audioArray.length >= targetSamples) {
+      // Keep last N seconds
+      return audioArray.slice(-targetSamples);
+    } else {
+      // Pad at the front with zeros
+      const padded = new Float32Array(targetSamples);
+      padded.set(audioArray, targetSamples - audioArray.length);
+      return padded;
+    }
+  }
+
+  async predictEndpoint(audioArray: Float32Array): Promise<{ prediction: number; probability: number }> {
+    if (!this.session || !this.initialized) {
+      throw new Error("Smart Turn v3 model not initialized");
+    }
+
+    try {
+      // Step 1: Ensure audio length equals 8 seconds
+      const processedAudio = this.truncateAudioToLastNSeconds(audioArray);
+
+      // Step 2: Extract features using WhisperFeatureExtractor
+      // Convert Float32Array to number[] for compatibility with the library
+      const audioAsNumbers = Array.from(processedAudio);
+      const features = this.featureExtractor.extractFeatures(audioAsNumbers, {
+        samplingRate: this.sampleRate,
+        returnTensors: "np",
+        padding: "maxLength",
+        maxLength: this.nSeconds * this.sampleRate,
+        truncation: true,
+        doNormalize: true
+      });
+
+      // Step 3: Prepare input tensor for ONNX
+      // Get features from BatchFeature object
+      const inputFeaturesArray = features.get("input_features") as number[][][];
+
+      // Flatten to Float32Array for ONNX (assuming single batch item)
+      const inputFeatures = new Float32Array(inputFeaturesArray[0].flat());
+
+      // Add batch dimension to make it [1, feat_dim, seq_len] to match model expectations
+      const inputTensor = new ort.Tensor("float32", inputFeatures, [1, 80, inputFeatures.length / 80]); // 80-dim features, transposed
+
+      // Step 4: Run inference
+      const outputs = await this.session.run({
+        input_features: inputTensor
+      });
+
+      // Step 5: Extract probability and make prediction
+      const outputKey = Object.keys(outputs)[0];
+      const probability = (outputs[outputKey].data as Float32Array)[0];
+      const prediction = probability > 0.5 ? 1 : 0;
+
+      return {
+        prediction,
+        probability
+      };
+    } catch (error) {
+      console.error("Error in Smart Turn v3 prediction:", error);
+      throw error;
+    }
+  }
+}
+
 // Moonshine ASR class
 export class Moonshine {
   private modelName: string;
@@ -282,7 +382,7 @@ export class Moonshine {
   }
 
   private argMax(array: Float32Array | number[]): number {
-    return array.reduce((maxIndex: number, current: number, index: number, arr: Float32Array | number[]) =>
+    return Array.from(array).reduce((maxIndex: number, current: number, index: number, arr: number[]) =>
       current > arr[maxIndex] ? index : maxIndex, 0);
   }
 
@@ -349,7 +449,7 @@ export class Moonshine {
       // Step 2: Encode - find layer_norm output
       const encodeResult = await this.model.encode.run({
         args_0: new ort.Tensor("float32", seqFeatureData, seqFeatureDims),
-        args_1: new ort.Tensor("int32", [seqFeatureDims[1]], [1])
+        args_1: new ort.Tensor("int32", new Int32Array([seqFeatureDims[1]]), [1])
       });
 
       // Find context tensor (key starting with "layer_norm")
@@ -371,9 +471,9 @@ export class Moonshine {
       // Step 3: Initial uncached decode
       let seqLen = 1;
       let decode = await this.model.uncached_decode.run({
-        args_0: new ort.Tensor("int32", [[1]], [1, 1]),
+        args_0: new ort.Tensor("int32", new Int32Array([1]), [1, 1]),
         args_1: new ort.Tensor("float32", contextData, contextDims),
-        args_2: new ort.Tensor("int32", [seqLen], [1])
+        args_2: new ort.Tensor("int32", new Int32Array([seqLen]), [1])
       });
 
       // Step 4: Autoregressive decoding loop
@@ -392,9 +492,9 @@ export class Moonshine {
 
         // Prepare feed for cached decode
         const feed: Record<string, ort.Tensor> = {
-          args_0: new ort.Tensor("int32", [[nextToken]], [1, 1]),
+          args_0: new ort.Tensor("int32", new Int32Array([nextToken]), [1, 1]),
           args_1: new ort.Tensor("float32", contextData, contextDims),
-          args_2: new ort.Tensor("int32", [seqLen], [1])
+          args_2: new ort.Tensor("int32", new Int32Array([seqLen]), [1])
         };
 
         // Add non-reversible tensors from previous decode
@@ -646,228 +746,8 @@ export class OpenAIRealtime {
   }
 }
 
-// DOM elements
-const startBtn = document.getElementById('startBtn') as HTMLButtonElement;
-const stopBtn = document.getElementById('stopBtn') as HTMLButtonElement;
-const statusDiv = document.getElementById('status') as HTMLDivElement;
-const speechSegmentsDiv = document.getElementById('speechSegments') as HTMLDivElement;
-const transcriptionsDiv = document.getElementById('transcriptions') as HTMLDivElement;
-
-// Global VAD and ASR instances and recording state
-let vad: VadIterator | null = null;
-let moonshine: Moonshine | null = null;
-let openaiRealtime: OpenAIRealtime | null = null;
-let mediaRecorder: MediaRecorder | null = null;
-let audioContext: AudioContext | null = null;
-let isRecording = false;
-let recordedChunks: Float32Array[] = [];
-let lastTranscriptionTime = 0;
-let currentSpeechBuffer: Float32Array[] = [];
-let speechStartTime = 0;
-let silenceTimeout: NodeJS.Timeout | null = null;
-let currentTranscription = "";
-let ringBuffer: RingBuffer | null = null;
-
-// Update status display
-function updateStatus(msg: string, className = '') {
-  if (statusDiv) {
-    statusDiv.textContent = 'Status: ' + msg;
-    statusDiv.className = className;
-  }
-}
-
-// Display speech segments
-function displayResults(timestamps: Timestamp[]) {
-  if (!speechSegmentsDiv) return;
-
-  if (timestamps.length === 0) {
-    speechSegmentsDiv.innerHTML = '<p>No speech segments detected.</p>';
-    return;
-  }
-
-  const segmentsList = timestamps.map((ts, index) => {
-    const startSec = Math.round((ts.start / 16000) * 100) / 100;
-    const endSec = Math.round((ts.end / 16000) * 100) / 100;
-    return `<div class="segment">Segment ${index + 1}: ${startSec}s - ${endSec}s</div>`;
-  }).join('');
-
-  speechSegmentsDiv.innerHTML = segmentsList;
-}
-
-// Display transcriptions
-function displayTranscription(transcription: string, timestamp: number) {
-  if (!transcriptionsDiv) return;
-
-  const timeStr = new Date(timestamp).toLocaleTimeString();
-  const transcriptionElement = document.createElement('div');
-  transcriptionElement.className = 'transcription';
-  transcriptionElement.innerHTML = `<strong>[${timeStr}]</strong> ${transcription}`;
-
-  transcriptionsDiv.appendChild(transcriptionElement);
-  transcriptionsDiv.scrollTop = transcriptionsDiv.scrollHeight;
-}
-
-// Display OpenAI responses
-function displayOpenAIResponse(response: any, timestamp: number) {
-  if (!transcriptionsDiv) return;
-
-  let responseText = "";
-  for (const item of response.response.output) {
-    switch (item.type) {
-      case "message":
-        const content = item.content.map((x: any) => x.text).join(' ');
-        responseText += content;
-        break;
-      case "function_call":
-        const functionMsg = `Called ${item.name}`;
-        responseText += "\n" + functionMsg;
-        break;
-      case "function_call_output":
-        const outputMsg = `${item.name} finished`;
-        responseText += "\n" + outputMsg;
-        break;
-      default:
-        console.log(`Unhandled item type: ${item.type}`);
-    }
-  }
-  // const responseText = JSON.parse(response).response.output[0].content[0].text;
-  const timeStr = new Date(timestamp).toLocaleTimeString();
-  const responseElement = document.createElement('div');
-  responseElement.className = 'openai-response';
-  responseElement.innerHTML = `<strong>[${timeStr}] GPT:</strong> ${responseText}`;
-  responseElement.style.backgroundColor = '#e8f4fd';
-  responseElement.style.padding = '8px';
-  responseElement.style.marginTop = '4px';
-  responseElement.style.borderRadius = '4px';
-
-  transcriptionsDiv.appendChild(responseElement);
-  transcriptionsDiv.scrollTop = transcriptionsDiv.scrollHeight;
-}
-
-// Send transcription to OpenAI and get response
-async function sendToOpenAI(transcription: string) {
-  if (!openaiRealtime || !transcription.trim()) return;
-
-  try {
-    console.log('Sending to OpenAI:', transcription);
-    const response = await openaiRealtime.sendTextAndGetResponse(transcription);
-    console.log('OpenAI response:', response);
-    displayOpenAIResponse(response, Date.now());
-  } catch (error) {
-    console.error('Error getting OpenAI response:', error);
-    displayOpenAIResponse('Error getting response from OpenAI', Date.now());
-  }
-}
-
-// Handle transcription for speech segment
-async function transcribeSpeech(audioData: Float32Array) {
-  if (!moonshine) return;
-
-  try {
-    const transcription = await moonshine.generate(audioData);
-    if (transcription.trim()) {
-      displayTranscription(transcription.trim(), Date.now());
-
-      // Accumulate transcription for OpenAI
-      currentTranscription += (currentTranscription ? ' ' : '') + transcription.trim();
-
-      // Clear any existing timeout and set new one for 1.5s
-      if (silenceTimeout) {
-        clearTimeout(silenceTimeout);
-      }
-
-      silenceTimeout = setTimeout(async () => {
-        if (currentTranscription.trim()) {
-          await sendToOpenAI(currentTranscription.trim());
-          currentTranscription = "";
-        }
-      }, 1500); // 1.5 seconds after speech ends
-    }
-  } catch (error) {
-    console.error('Error transcribing speech:', error);
-  }
-}
-
-// Process audio chunk for real-time VAD and transcription
-let speechDetected = false;
-let speechStarted = false;
-let silenceCounter = 0;
-const SILENCE_THRESHOLD = 10; // chunks of silence to detect speech end
-
-async function processAudioChunk(audioChunk: Float32Array) {
-  if (!vad || !ringBuffer) return;
-
-  // Always write incoming audio to the ring buffer
-  ringBuffer.write(audioChunk);
-
-  // Process chunk with VAD to detect speech activity
-  try {
-    // Use a sliding window approach for real-time detection
-    const windowSize = 512; // Match VAD window size
-    for (let i = 0; i < audioChunk.length; i += windowSize) {
-      const chunk = audioChunk.slice(i, Math.min(i + windowSize, audioChunk.length));
-      if (chunk.length === windowSize) {
-        // Simple VAD prediction on chunk (this is a simplified approach)
-        await vad.predict(chunk);
-      }
-    }
-
-    // Check VAD state for speech activity
-    const hasCurrentSpeech = vad.triggered;
-
-    if (hasCurrentSpeech && !speechStarted) {
-      // Speech started - include buffered audio to prevent losing first bit of speech
-      speechStarted = true;
-      silenceCounter = 0;
-      speechStartTime = Date.now();
-
-      // Get pre-speech audio from ring buffer and start current speech buffer
-      const bufferedAudio = ringBuffer.read();
-      currentSpeechBuffer = [bufferedAudio, audioChunk];
-    } else if (speechStarted) {
-      // Speech is ongoing - add chunk to current speech buffer
-      currentSpeechBuffer.push(audioChunk);
-
-      if (!hasCurrentSpeech) {
-        // Potential speech end, count silence
-        silenceCounter++;
-
-        if (silenceCounter >= SILENCE_THRESHOLD) {
-          // Speech ended, transcribe the current buffer
-          const currentAudio = combineAudioChunks(currentSpeechBuffer);
-          if (currentAudio.length > 0) {
-            await transcribeSpeech(currentAudio);
-            currentSpeechBuffer = [];
-            lastTranscriptionTime = Date.now();
-          }
-          speechStarted = false;
-          silenceCounter = 0;
-        }
-      } else {
-        // Reset silence counter if speech continues
-        silenceCounter = 0;
-      }
-    }
-
-    // Check for 5-second interval transcription
-    const now = Date.now();
-    if (now - lastTranscriptionTime >= 5000 && currentSpeechBuffer.length > 0) {
-      // Check if there's ongoing speech to transcribe
-      const currentAudio = combineAudioChunks(currentSpeechBuffer);
-      if (currentAudio.length > 0) {
-        await transcribeSpeech(currentAudio);
-        currentSpeechBuffer = []; // Clear buffer after transcription
-        lastTranscriptionTime = now;
-      }
-    }
-
-  } catch (error) {
-    console.error('Error processing audio chunk:', error);
-  }
-}
-
 // Helper function to combine audio chunks into a single Float32Array
-function combineAudioChunks(chunks: Float32Array[]): Float32Array {
+export function combineAudioChunks(chunks: Float32Array[]): Float32Array {
   if (chunks.length === 0) return new Float32Array(0);
 
   const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
@@ -882,196 +762,6 @@ function combineAudioChunks(chunks: Float32Array[]): Float32Array {
   return combined;
 }
 
-// Initialize VAD and Moonshine ASR
-async function initializeModels() {
-  try {
-    updateStatus('Initializing VAD model...', 'loading');
-    vad = new VadIterator("/models/silero_vad.onnx");
-    await vad.init();
-    updateStatus('VAD model loaded, loading ASR...', 'loading');
-
-    moonshine = new Moonshine("moonshine-base");
-    await moonshine.loadModel();
-    updateStatus('ASR loaded, connecting to OpenAI...', 'loading');
-
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-
-    openaiRealtime = new OpenAIRealtime(apiKey);
-    await openaiRealtime.connect();
-    updateStatus('All models loaded and connected successfully', 'success');
-    return true;
-  } catch (error) {
-    console.error('Failed to initialize models:', error);
-    updateStatus('Failed to load models or connect to OpenAI', 'error');
-    return false;
-  }
-}
-
-// Start microphone recording
-async function startRecording() {
-  try {
-    updateStatus('Requesting microphone access...', 'loading');
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        sampleRate: 16000,
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true
-      }
-    });
-
-    audioContext = new AudioContext({ sampleRate: 16000 });
-    const source = audioContext.createMediaStreamSource(stream);
-
-    // Initialize models if not already done
-    if (!vad || !moonshine) {
-      const initialized = await initializeModels();
-      if (!initialized) return;
-    }
-
-    // Create audio worklet for real-time processing
-    await audioContext.audioWorklet.addModule(createAudioProcessorBlob());
-    const processorNode = new AudioWorkletNode(audioContext, 'vad-processor');
-
-    processorNode.port.onmessage = async (event) => {
-      const { audioData } = event.data;
-      const audioChunk = new Float32Array(audioData);
-      recordedChunks.push(audioChunk);
-
-      // Real-time processing for speech detection and transcription
-      await processAudioChunk(audioChunk);
-    };
-
-    source.connect(processorNode);
-    processorNode.connect(audioContext.destination);
-
-    isRecording = true;
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-    recordedChunks = [];
-    currentSpeechBuffer = [];
-    lastTranscriptionTime = Date.now();
-    speechStarted = false;
-    silenceCounter = 0;
-
-    // Initialize ring buffer to store 1 second of audio (16000 samples at 16kHz)
-    ringBuffer = new RingBuffer(16000);
-
-    updateStatus('Recording... Speak into your microphone', 'recording');
-
-  } catch (error) {
-    console.error('Error starting recording:', error);
-    updateStatus('Failed to access microphone', 'error');
-  }
-}
-
-// Stop recording and process audio
-async function stopRecording() {
-  if (!isRecording || !audioContext) return;
-
-  isRecording = false;
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-
-  // Clear any pending timeout
-  if (silenceTimeout) {
-    clearTimeout(silenceTimeout);
-    silenceTimeout = null;
-  }
-
-  // Send any remaining transcription to OpenAI
-  if (currentTranscription.trim()) {
-    await sendToOpenAI(currentTranscription.trim());
-    currentTranscription = "";
-  }
-
-  // Stop audio context
-  await audioContext.close();
-  audioContext = null;
-
-  // Clear ring buffer
-  if (ringBuffer) {
-    ringBuffer.clear();
-    ringBuffer = null;
-  }
-
-  if (recordedChunks.length === 0) {
-    updateStatus('No audio recorded', 'error');
-    return;
-  }
-
-  try {
-    updateStatus('Processing recorded audio...', 'loading');
-
-    // Combine all recorded chunks
-    const totalLength = recordedChunks.reduce((sum, chunk) => sum + chunk.length, 0);
-    const combinedAudio = new Float32Array(totalLength);
-    let offset = 0;
-
-    for (const chunk of recordedChunks) {
-      combinedAudio.set(chunk, offset);
-      offset += chunk.length;
-    }
-
-    // Process with VAD
-    await vad!.process(combinedAudio);
-    const timestamps = vad!.getSpeechTimestamps();
-    displayResults(timestamps);
-
-    updateStatus(`Processing complete - ${timestamps.length} speech segments found`, 'success');
-  } catch (error) {
-    console.error('Error processing recorded audio:', error);
-    updateStatus('Error processing recorded audio', 'error');
-  }
-}
-
-// Create audio processor worklet as blob
-function createAudioProcessorBlob(): string {
-  const processorCode = `
-    class VADProcessor extends AudioWorkletProcessor {
-      constructor() {
-        super();
-        this.bufferSize = 512;
-        this.buffer = new Float32Array(this.bufferSize);
-        this.bufferIndex = 0;
-      }
-
-      process(inputs, outputs, parameters) {
-        const input = inputs[0];
-        if (input.length > 0) {
-          const inputChannel = input[0];
-
-          for (let i = 0; i < inputChannel.length; i++) {
-            this.buffer[this.bufferIndex] = inputChannel[i];
-            this.bufferIndex++;
-
-            if (this.bufferIndex >= this.bufferSize) {
-              // Send buffer to main thread
-              this.port.postMessage({
-                audioData: Array.from(this.buffer)
-              });
-
-              this.bufferIndex = 0;
-            }
-          }
-        }
-
-        return true;
-      }
-    }
-
-    registerProcessor('vad-processor', VADProcessor);
-  `;
-
-  return URL.createObjectURL(new Blob([processorCode], { type: 'application/javascript' }));
-}
-
-// Event listeners
-startBtn?.addEventListener('click', startRecording);
-stopBtn?.addEventListener('click', stopRecording);
-
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', () => {
-  updateStatus('Ready - click Start Recording to begin');
+export default mount(App, {
+  target: document.getElementById("app")!,
 });

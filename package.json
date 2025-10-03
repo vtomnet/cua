@@ -10,6 +10,7 @@
     "dev": "bun run dev:${TARGET-web}"
   },
   "trustedDependencies": [
+    "@tailwindcss/oxide",
     "esbuild",
     "node-datachannel",
     "protobufjs"

@@ -1,4 +1,6 @@
 import { defineConfig } from "vite";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
+import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
 const repoRoot = path.resolve(__dirname, "../../");
@@ -23,4 +25,8 @@ export default defineConfig({
     exclude: ["onnxruntime-web"],
   },
   assetsInclude: ["**/*.wasm"],
+  plugins: [
+    svelte(),
+    tailwindcss(),
+  ],
 });
