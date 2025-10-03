@@ -528,6 +528,179 @@ export class Moonshine {
   }
 }
 
+// OpenAI Realtime Transcription API integration
+export class OpenAIRealtimeTranscription {
+  private ws: WebSocket | null = null;
+  private apiKey: string;
+  private sampleRate: number;
+  private initialized: boolean = false;
+  private minSamples: number;
+
+  constructor(apiKey: string, sampleRate = 24000) {
+    this.apiKey = apiKey;
+    this.sampleRate = sampleRate;
+    // Minimum 100ms of audio required by OpenAI API
+    this.minSamples = Math.ceil((sampleRate * 100) / 1000); // 100ms worth of samples
+  }
+
+  async init(): Promise<void> {
+    try {
+      const uri = "wss://api.openai.com/v1/realtime?intent=transcription";
+
+      this.ws = await new Promise((resolve, reject) => {
+        const ws = new WebSocket(uri);
+
+        // Set authorization header (browser WebSocket doesn't support custom headers)
+        // We'll use the subprotocol approach instead
+        ws.close();
+
+        // Retry with subprotocol authentication
+        const wsWithAuth = new WebSocket(uri, ["realtime", `openai-insecure-api-key.${this.apiKey}`]);
+
+        wsWithAuth.onopen = () => {
+          console.log('Connected to OpenAI realtime transcription API');
+          resolve(wsWithAuth);
+        };
+
+        wsWithAuth.onerror = (error) => {
+          console.error('WebSocket connection error:', error);
+          reject(new Error('Failed to connect to OpenAI realtime transcription API'));
+        };
+
+        wsWithAuth.onclose = (event) => {
+          if (!this.initialized) {
+            reject(new Error(`WebSocket closed during initialization: ${event.code} ${event.reason}`));
+          }
+        };
+      });
+
+      // Send session configuration for transcription
+      const sessionUpdate = {
+        "type": "session.update",
+        "session": {
+          "type": "transcription",
+          "audio": {
+            "input": {
+              "format": {
+                "rate": this.sampleRate,
+                "type": "audio/pcm"
+              },
+              "noise_reduction": {
+                "type": "far_field"
+              },
+              "transcription": {
+                "language": "en",
+                "model": "gpt-4o-mini-transcribe"
+              },
+              "turn_detection": null
+            }
+          },
+          "include": [
+            "item.input_audio_transcription.logprobs"
+          ]
+        }
+      };
+
+      if (this.ws) {
+        this.ws.send(JSON.stringify(sessionUpdate));
+        this.initialized = true;
+      } else {
+        throw new Error('WebSocket connection failed');
+      }
+    } catch (error) {
+      console.error('Failed to initialize OpenAI realtime transcription:', error);
+      throw error;
+    }
+  }
+
+  async transcribe(audioData: Float32Array): Promise<string> {
+    if (!this.ws || !this.initialized) {
+      throw new Error('OpenAI realtime transcription not initialized');
+    }
+
+    // Check if we have enough audio data (minimum 100ms)
+    if (audioData.length < this.minSamples) {
+      console.warn(`Audio too short for OpenAI transcription: ${audioData.length} samples (${(audioData.length / this.sampleRate * 1000).toFixed(1)}ms), minimum required: ${this.minSamples} samples (100ms)`);
+      return ""; // Return empty string for short audio
+    }
+
+    return new Promise((resolve, reject) => {
+      // Convert Float32Array to PCM format (16-bit)
+      const pcmData = new Int16Array(audioData.length);
+      for (let i = 0; i < audioData.length; i++) {
+        pcmData[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32767));
+      }
+
+      // Convert to base64 in chunks to avoid stack overflow
+      const bytes = new Uint8Array(pcmData.buffer);
+      let binaryString = '';
+      const chunkSize = 8192; // Process in 8KB chunks
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.slice(i, i + chunkSize);
+        binaryString += String.fromCharCode(...chunk);
+      }
+      const b64Data = btoa(binaryString);
+
+      // Send audio data
+      this.ws!.send(JSON.stringify({
+        type: "input_audio_buffer.append",
+        audio: b64Data,
+      }));
+
+      // Commit the audio buffer
+      this.ws!.send(JSON.stringify({
+        type: "input_audio_buffer.commit",
+      }));
+
+      // Listen for transcription response
+      const messageHandler = (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === "conversation.item.input_audio_transcription.completed") {
+            this.ws!.removeEventListener('message', messageHandler);
+
+            // Clear the buffer for next transcription
+            this.ws!.send(JSON.stringify({
+              type: "input_audio_buffer.clear",
+            }));
+
+            resolve(data.transcript || "");
+          } else if (data.type === "error") {
+            this.ws!.removeEventListener('message', messageHandler);
+            reject(new Error(`OpenAI transcription error: ${data.error?.message || 'Unknown error'}`));
+          }
+        } catch (error) {
+          this.ws!.removeEventListener('message', messageHandler);
+          reject(error);
+        }
+      };
+
+      if (this.ws) {
+        this.ws.addEventListener('message', messageHandler);
+
+        // Set timeout for transcription
+        setTimeout(() => {
+          if (this.ws) {
+            this.ws.removeEventListener('message', messageHandler);
+          }
+          reject(new Error('Transcription timeout'));
+        }, 30000);
+      } else {
+        reject(new Error('WebSocket not available'));
+      }
+    });
+  }
+
+  disconnect(): void {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+      this.initialized = false;
+    }
+  }
+}
+
 // OpenAI Realtime API integration
 export class OpenAIRealtime {
   private ws: WebSocket | null = null;
