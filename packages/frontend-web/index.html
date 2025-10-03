@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Activity Detection</title>
+  <link rel="stylesheet" href="./src/styles.css"/>
+</head>
+<body>
+  <h1>Voice Activity Detection</h1>
+
+  <div id="status">Status: Ready</div>
+
+  <div class="recording-section">
+    <h2>Microphone Recording</h2>
+    <button id="startBtn">Start Recording</button>
+    <button id="stopBtn" disabled>Stop Recording</button>
+  </div>
+
+  <div id="results" style="margin-top: 20px;">
+    <h3>Speech Segments:</h3>
+    <div id="speechSegments"></div>
+  </div>
+
+  <div id="transcription-results" style="margin-top: 20px;">
+    <h3>Transcriptions:</h3>
+    <div id="transcriptions" style="max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; background-color: #f9f9f9;"></div>
+  </div>
+
+  <div id="info" style="margin-top: 20px; font-size: 14px; color: #666;">
+    Click "Start Recording" to begin recording from your microphone. The system will detect speech segments using VAD and transcribe them using Moonshine ASR on speech end or every 5 seconds.
+  </div>
+
+  <script src="./src/main.ts" type="module"></script>
+</body>
