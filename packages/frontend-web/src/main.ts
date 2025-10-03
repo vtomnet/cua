@@ -374,11 +374,13 @@ export class Moonshine {
     cached_decode?: ort.InferenceSession;
   };
   private initialized: boolean;
+  private minSamples: number;
 
   constructor(modelName = "moonshine-base") {
     this.modelName = modelName;
     this.model = {};
     this.initialized = false;
+    this.minSamples = 2048; // guard to avoid extremely short inputs that break conv layers
   }
 
   private argMax(array: Float32Array | number[]): number {
@@ -431,6 +433,11 @@ export class Moonshine {
     if (!this.initialized || !this.model.preprocess || !this.model.encode ||
         !this.model.uncached_decode || !this.model.cached_decode) {
       console.warn("Tried to call Moonshine.generate() before the model was loaded.");
+      return "";
+    }
+
+    // Skip inference if too few samples; accumulate more audio first
+    if (audio.length < this.minSamples) {
       return "";
     }
 
