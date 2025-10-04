@@ -13,8 +13,16 @@
   let status = 'Ready - click Start Recording to begin';
   let statusClass = '';
   let speechSegments: Timestamp[] = [];
-  let transcriptions: { text: string; timestamp: string }[] = [];
-  let openaiResponses: { text: string; timestamp: string }[] = [];
+  let transcriptions: { text: string; timestamp: number }[] = [];
+  let openaiResponses: { text: string; timestamp: number }[] = [];
+  type Message = { text: string; timestamp: number; role: 'user' | 'assistant' };
+
+  $: messages = (
+    [
+      ...transcriptions.map((entry) => ({ ...entry, role: 'user' as const })),
+      ...openaiResponses.map((entry) => ({ ...entry, role: 'assistant' as const })),
+    ].sort((a, b) => a.timestamp - b.timestamp)
+  ) as Message[];
 
   // Global instances (will be available from main.ts)
   let vad: VadIterator | null = null;
@@ -64,14 +72,16 @@
 
   // Display transcriptions
   function displayTranscription(transcription: string, timestamp: number) {
-    const timeStr = new Date(timestamp).toLocaleTimeString();
-    transcriptions = [...transcriptions, { text: transcription, timestamp: timeStr }];
+    transcriptions = [...transcriptions, { text: transcription, timestamp }];
   }
 
   // Display OpenAI responses
   function displayOpenAIResponse(responseText: string, timestamp: number) {
-    const timeStr = new Date(timestamp).toLocaleTimeString();
-    openaiResponses = [...openaiResponses, { text: responseText, timestamp: timeStr }];
+    openaiResponses = [...openaiResponses, { text: responseText, timestamp }];
+  }
+
+  function formatTimestamp(timestamp: number): string {
+    return new Date(timestamp).toLocaleTimeString();
   }
 
   // Send transcription to OpenAI and get response
@@ -157,7 +167,7 @@
       console.error('Error getting generator response:', error);
       // Only display error if user hasn't spoken since the request was sent
       if (lastUserSpeechTime <= lastRequestTimestamp) {
-        openaiResponses = [...openaiResponses, { text: 'Error getting response from generator', timestamp: new Date().toLocaleTimeString() }];
+        openaiResponses = [...openaiResponses, { text: 'Error getting response from generator', timestamp: Date.now() }];
       }
     } finally {
       isProcessingOpenAI = false;
@@ -614,15 +624,16 @@
   <div class="mt-8 p-6 bg-white rounded-lg border border-gray-200 shadow-sm">
     <h3 class="text-2xl font-medium mb-4 text-gray-600">Transcriptions:</h3>
     <div class="max-h-96 overflow-y-auto border border-gray-300 rounded-md p-4 bg-gray-50 mt-4">
-      {#each transcriptions as transcription}
-        <div class="py-2 border-b border-gray-200 leading-relaxed">
-          <strong>[{transcription.timestamp}]</strong> {transcription.text}
-        </div>
-      {/each}
-      {#each openaiResponses as response}
-        <div class="bg-blue-50 p-3 mt-1 rounded-md border-l-4 border-blue-500" style="white-space: pre-line;">
-          <strong>[{response.timestamp}] GPT:</strong> {response.text}
-        </div>
+      {#each messages as message}
+        {#if message.role === 'user'}
+          <div class="py-2 border-b border-gray-200 leading-relaxed">
+            <strong>[{formatTimestamp(message.timestamp)}]</strong> {message.text}
+          </div>
+        {:else}
+          <div class="bg-blue-50 p-3 mt-1 rounded-md border-l-4 border-blue-500" style="white-space: pre-line;">
+            <strong>[{formatTimestamp(message.timestamp)}] GPT:</strong> {message.text}
+          </div>
+        {/if}
       {/each}
     </div>
   </div>
