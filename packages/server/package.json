@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {},
   "dependencies": {
+    "@cerebras/cerebras_cloud_sdk": "^1.50.0",
     "core": "workspace:*",
     "express": "^5.1.0",
     "node-datachannel": "^0.29.0",

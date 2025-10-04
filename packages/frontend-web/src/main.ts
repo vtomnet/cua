@@ -548,12 +548,6 @@ export class OpenAIRealtimeTranscription {
       const uri = "wss://api.openai.com/v1/realtime?intent=transcription";
 
       this.ws = await new Promise((resolve, reject) => {
-        const ws = new WebSocket(uri);
-
-        // Set authorization header (browser WebSocket doesn't support custom headers)
-        // We'll use the subprotocol approach instead
-        ws.close();
-
         // Retry with subprotocol authentication
         const wsWithAuth = new WebSocket(uri, ["realtime", `openai-insecure-api-key.${this.apiKey}`]);
 
@@ -847,10 +841,12 @@ export class OpenAIRealtime {
         }]
       });
 
+      console.log("Sending messages:", this.messages);
+
       this.ws.send(JSON.stringify({
         type: "response.create",
         response: {
-          conversation: null,
+          conversation: "none",
           input: this.messages,
         }
       }));

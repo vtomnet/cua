@@ -4,7 +4,6 @@
     VadIterator,
     SmartTurnV3,
     OpenAIRealtimeTranscription,
-    OpenAIRealtime,
     RingBuffer,
     Timestamp,
   } from './main';
@@ -20,7 +19,6 @@
   // Global instances (will be available from main.ts)
   let vad: VadIterator | null = null;
   let openaiTranscription: OpenAIRealtimeTranscription | null = null;
-  let openaiRealtime: OpenAIRealtime | null = null;
   let smartTurn: SmartTurnV3 | null = null;
   let audioContext: AudioContext | null = null;
   let recordedChunks: Float32Array[] = [];
@@ -71,55 +69,95 @@
   }
 
   // Display OpenAI responses
-  function displayOpenAIResponse(response: any, timestamp: number) {
-    let responseText = "";
-    for (const item of response.response.output) {
-      switch (item.type) {
-        case "message":
-          const content = item.content.map((x: any) => x.text).join(' ');
-          responseText += content;
-          break;
-        case "function_call":
-          const functionMsg = `Called ${item.name}(${JSON.stringify(item.arguments)})`;
-          responseText += "\n" + functionMsg;
-          break;
-        case "function_call_output":
-          const outputMsg = `${item.name} finished`;
-          responseText += "\n" + outputMsg;
-          break;
-        default:
-          console.log(`Unhandled item type: ${item.type}`);
-      }
-    }
-
+  function displayOpenAIResponse(responseText: string, timestamp: number) {
     const timeStr = new Date(timestamp).toLocaleTimeString();
     openaiResponses = [...openaiResponses, { text: responseText, timestamp: timeStr }];
   }
 
   // Send transcription to OpenAI and get response
   async function sendToOpenAI(transcription: string) {
-    if (!openaiRealtime || !transcription.trim() || isProcessingOpenAI) return;
+    if (!transcription.trim() || isProcessingOpenAI) return;
 
     // Prevent duplicate requests
     isProcessingOpenAI = true;
     lastRequestTimestamp = Date.now();
 
     try {
-      console.log('Sending to OpenAI:', transcription);
-      const response = await openaiRealtime.sendTextAndGetResponse(transcription);
-      console.log('OpenAI response:', response);
+      console.log('Sending transcription to local generator:', transcription);
+      const response = await fetch('http://localhost:3000/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ input: transcription }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('Local generator response:', data);
+
+      const choice = data?.choices?.[0];
+      const message = choice?.message ?? null;
+      const responseLines: string[] = [];
+
+      const reasoning = typeof message?.reasoning === 'string' ? message.reasoning.trim() : '';
+      if (reasoning) {
+        responseLines.push(`Reasoning: ${reasoning}`);
+      }
+
+      const content = message?.content;
+      if (Array.isArray(content)) {
+        const contentText = content
+          .map((entry: unknown) => {
+            if (typeof entry === 'string') return entry;
+            if (entry && typeof entry === 'object') {
+              const maybeText = (entry as { text?: string }).text;
+              if (typeof maybeText === 'string') return maybeText;
+            }
+            return '';
+          })
+          .join(' ')
+          .trim();
+        if (contentText) {
+          responseLines.push(contentText);
+        }
+      } else if (typeof content === 'string' && content.trim()) {
+        responseLines.push(content.trim());
+      }
+
+      const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+      for (const call of toolCalls) {
+        const toolName = call?.function?.name ?? call?.name ?? 'unknown_tool';
+        const args = call?.function?.arguments ?? call?.arguments ?? '';
+        const argsStr = typeof args === 'string' ? args : JSON.stringify(args);
+        responseLines.push(`Called ${toolName}(${argsStr})`);
+      }
+
+      if (!responseLines.length) {
+        const fallback = choice?.text ?? data?.choices?.[0]?.text;
+        if (typeof fallback === 'string' && fallback.trim()) {
+          responseLines.push(fallback.trim());
+        } else {
+          responseLines.push(JSON.stringify(data));
+        }
+      }
+
+      const responseText = responseLines.join('\n');
 
       // Only display response if user hasn't spoken since the request was sent
       if (lastUserSpeechTime <= lastRequestTimestamp) {
-        displayOpenAIResponse(response, Date.now());
+        displayOpenAIResponse(responseText, Date.now());
       } else {
-        console.log('Ignoring OpenAI response - user has spoken since request was sent');
+        console.log('Ignoring generator response - user has spoken since request was sent');
       }
     } catch (error) {
-      console.error('Error getting OpenAI response:', error);
+      console.error('Error getting generator response:', error);
       // Only display error if user hasn't spoken since the request was sent
       if (lastUserSpeechTime <= lastRequestTimestamp) {
-        openaiResponses = [...openaiResponses, { text: 'Error getting response from OpenAI', timestamp: new Date().toLocaleTimeString() }];
+        openaiResponses = [...openaiResponses, { text: 'Error getting response from generator', timestamp: new Date().toLocaleTimeString() }];
       }
     } finally {
       isProcessingOpenAI = false;
@@ -358,11 +396,7 @@
       // Initialize OpenAI transcription (uses 24kHz but we'll resample if needed)
       openaiTranscription = new OpenAIRealtimeTranscription(apiKey, 24000);
       await openaiTranscription.init();
-      updateStatus('OpenAI Transcription loaded, connecting to OpenAI chat...', 'loading');
-
-      openaiRealtime = new OpenAIRealtime(apiKey);
-      await openaiRealtime.connect();
-      updateStatus('All models loaded and connected successfully', 'success');
+      updateStatus('OpenAI Transcription loaded, ready to generate responses locally', 'success');
       return true;
     } catch (error) {
       console.error('Failed to initialize models:', error);
@@ -586,7 +620,7 @@
         </div>
       {/each}
       {#each openaiResponses as response}
-        <div class="bg-blue-50 p-3 mt-1 rounded-md border-l-4 border-blue-500">
+        <div class="bg-blue-50 p-3 mt-1 rounded-md border-l-4 border-blue-500" style="white-space: pre-line;">
           <strong>[{response.timestamp}] GPT:</strong> {response.text}
         </div>
       {/each}
@@ -594,6 +628,6 @@
   </div>
 
   <div class="mt-8 p-4 text-sm text-gray-500 bg-gray-50 rounded-md border border-gray-200">
-    Click "Start Recording" to begin recording from your microphone. The system will detect speech segments using VAD and transcribe them using OpenAI Realtime API on speech end or every 5 seconds.
+    Click "Start Recording" to begin recording from your microphone. The system will detect speech segments using VAD, transcribe them with OpenAI's API on speech end or every 5 seconds, and forward transcripts to the local generator service for replies.
   </div>
 </main>
