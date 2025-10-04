@@ -92,6 +92,7 @@ app.post("/generate", async (req, res) => {
       messages: [{ role: "user", content: input }],
       model: "gpt-oss-120b",
       tools,
+      reasoning_effort: "low",
     });
 
     res.json(completion);
