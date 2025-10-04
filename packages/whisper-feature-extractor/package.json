@@ -9,7 +9,6 @@
   "scripts": {
     "build": "bun build src/index.ts --outdir=dist --format=esm --target=node && bun run build:types",
     "build:types": "tsc --project tsconfig.build.json",
-    "build:types-old": "tsc --emitDeclarationOnly --outDir dist --noEmit false",
     "dev": "bun build src/index.ts --watch --outdir=dist --format=esm --target=node",
     "test": "bun test",
     "test:watch": "bun test --watch",
