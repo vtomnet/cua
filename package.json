@@ -14,5 +14,8 @@
     "esbuild",
     "node-datachannel",
     "protobufjs"
-  ]
+  ],
+  "devDependencies": {
+    "vite": "^7.1.9"
+  }
 }

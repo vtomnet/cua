@@ -2,15 +2,25 @@
   "name": "frontend-native",
   "version": "0.0.1",
   "scripts": {
-    "dev": "electrobun dev",
-    "build": "electrobun build",
+    "dev": "concurrently \"vite\" \"electrobun dev\"",
+    "build": "vite build && electrobun build",
     "start": "bun run build && bun run dev"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "electrobun": "latest",
     "frontend-core": "workspace:*",
-    "electrobun": "latest"
+    "whisper-feature-extractor": "workspace:*",
+    "llama-tokenizer-js": "^1.2.2",
+    "onnxruntime-web": "^1.23.0",
+    "openai": "^6.1.0",
+    "tailwindcss": "^4.1.14"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "@tsconfig/svelte": "^5.0.5",
+    "@types/bun": "latest",
+    "concurrently": "^9.2.1",
+    "svelte": "^5.39.8"
   }
 }
