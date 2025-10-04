@@ -6,7 +6,7 @@
     OpenAIRealtimeTranscription,
     RingBuffer,
     Timestamp,
-  } from './main';
+  } from 'frontend-core';
 
   // Application state
   let isRecording = false;
