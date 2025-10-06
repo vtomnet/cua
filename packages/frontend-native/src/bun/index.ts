@@ -8,7 +8,7 @@ const rpc = BrowserView.defineRPC<CuaRPC>({
   handlers: {
     requests: {
       // FIXME: doesn't open applications, e.g. "open terminal"
-      doOpen: async ({ thing }) => {
+      doOpen: async ({ thing }: { thing: string }) => {
         console.log(`Opening ${thing}...`)
         await $`open ${thing}`;
         return;
