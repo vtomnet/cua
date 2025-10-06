@@ -21,6 +21,10 @@ export default {
         // },
         mac: {
             bundleCEF: false,
+            entitlements: {
+                "com.apple.security.device.microphone": true,
+                "com.apple.security.device.audio-input": true,
+            }
         },
         linux: {
             bundleCEF: false,
