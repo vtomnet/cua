@@ -1,8 +1,25 @@
-import { BrowserWindow } from "electrobun/bun";
+import { BrowserWindow, BrowserView } from "electrobun/bun";
+import { type CuaRPC } from "../shared/types";
+import robot from "@jitsi/robotjs";
+import { $ } from "bun";
+
+const rpc = BrowserView.defineRPC<CuaRPC>({
+  maxRequestTime: 5000,
+  handlers: {
+    requests: {
+      // FIXME: doesn't open applications, e.g. "open terminal"
+      doOpen: async ({ thing }) => {
+        console.log(`Opening ${thing}...`)
+        await $`open ${thing}`;
+        return;
+      }
+    }
+  }
+});
 
 // Create the main application window
 const mainWindow = new BrowserWindow({
-  title: "Hello Electrobun!",
+  title: "Cua",
   url: "views://mainview/index.html",
   frame: {
     width: 800,
@@ -10,6 +27,5 @@ const mainWindow = new BrowserWindow({
     x: 200,
     y: 200,
   },
+  rpc,
 });
-
-console.log("Hello Electrobun app started!");

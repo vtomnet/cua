@@ -7,6 +7,16 @@
     RingBuffer,
     Timestamp,
   } from 'frontend-core';
+  import Electrobun, { Electroview } from "electrobun/view";
+  import { type CuaRPC } from "../shared/types";
+
+  const rpc = Electroview.defineRPC<CuaRPC>({
+    handlers: {
+      requests: {},
+      messages: {}
+    }
+  });
+  const electrobun = new Electrobun.Electroview({ rpc });
 
   // Application state
   let isRecording = false;
@@ -141,9 +151,19 @@
       const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
       for (const call of toolCalls) {
         const toolName = call?.function?.name ?? call?.name ?? 'unknown_tool';
-        const args = call?.function?.arguments ?? call?.arguments ?? '';
-        const argsStr = typeof args === 'string' ? args : JSON.stringify(args);
+        let args = call?.function?.arguments ?? call?.arguments ?? '';
+        if (typeof args === 'string') args = JSON.parse(args);
+        const argsStr = JSON.stringify(args);
         responseLines.push(`Called ${toolName}(${argsStr})`);
+        if (toolName === "open") {
+          electrobun.rpc.request.doOpen({ thing: args.thing })
+            .then(result => {
+              console.log(`Called doOpen with ${args.thing}`);
+            })
+            .catch(err => {
+              console.error(`Error calling doOpen: ${err}`);
+            });
+        }
       }
 
       if (!responseLines.length) {

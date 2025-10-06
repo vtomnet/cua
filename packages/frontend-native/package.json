@@ -5,10 +5,10 @@
     "dev": "electrobun dev",
     "build": "vite build && electrobun build",
     "start": "bun run build && bun run dev",
-
     "link-electrobun": "mkdir -p node_modules && ln -sf ../../../node_modules/electrobun node_modules/electrobun"
   },
   "dependencies": {
+    "@jitsi/robotjs": "^0.6.18",
     "@tailwindcss/vite": "^4.1.14",
     "electrobun": "^0.1.7",
     "frontend-core": "workspace:*",
