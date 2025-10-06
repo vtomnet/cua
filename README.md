@@ -1,10 +1,8 @@
 # Computer Use Agent
 
-This program targets both web and native (via Tauri).
-To build for web, you will need [Bun](https://bun.com).
-To build for native, you will additionally need [Rust](https://rust-lang.org).
+Install [Bun](https://bun.com).
 
-You will also need to obtain the following files:
+Obtain the following files from GitHub/HuggingFace:
 
 ```
 packages/frontend-web/public
@@ -18,17 +16,16 @@ packages/frontend-web/public
     └── smart-turn-v3.0.onnx
 ```
 
-## init
+Set VITE_OPENAI_API_KEY and CEREBRAS_API_KEY.
 
+Run once:
 ```bash
-bun add
+bun install
+(cd packages/frontend-native && bun run link-electron)
+(cd packages/server && bun run link-ort)
+(cd packages/core && bun run build)
+(cd packages/frontend-core && bun run build)
+(cd packages/frontend-native && bun run build)
 ```
 
-## run
-
-```bash
-bun run dev:web     # or:
-bun run dev:native  # or:
-bun run dev:local   # or:
-TARGET=web bun dev  # TARGET={web,native,local,server}
-```
+Now you may run `bun dev` / `bun run build` from any package directory. You may need to rebuild packages/core or packages/frontend-core after updating them.

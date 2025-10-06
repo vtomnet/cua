@@ -1,12 +1,12 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "ESNext",
+    "module": "NodeNext",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "useDefineForClassFields": true,
     "skipLibCheck": true,
 
-    "moduleResolution": "Node",
+    "moduleResolution": "NodeNext",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": false,
@@ -26,7 +26,9 @@
     "baseUrl": ".",
     "paths": {
       "core": ["./packages/core/src"],
-      "frontend-core": ["./packages/frontend-core/src"]
+      "frontend-core": ["./packages/frontend-core/src"],
+      "frontend-native": ["./packages/frontend-native/src"],
+      "frontend-web": ["./packages/frontend-web/src"]
     }
   },
   "include": ["packages/*/src"]

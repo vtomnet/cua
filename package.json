@@ -6,6 +6,7 @@
   ],
   "scripts": {},
   "trustedDependencies": [
+    "@jitsi/robotjs",
     "@tailwindcss/oxide",
     "esbuild",
     "node-datachannel",
