@@ -4,11 +4,7 @@
   "workspaces": [
     "packages/*"
   ],
-  "scripts": {
-    "dev:web": "bun --filter frontend-web dev",
-    "dev:native": "bun --filter frontend-native dev",
-    "dev": "bun run dev:${TARGET-web}"
-  },
+  "scripts": {},
   "trustedDependencies": [
     "@tailwindcss/oxide",
     "esbuild",

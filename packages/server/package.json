@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --hot src/index.ts"
+    "dev": "bun --hot src/index.ts",
+
+    "link-ort": "ln -sf ../../../node_modules/onnxruntime-web/dist public/onnx"
   },
   "dependencies": {
     "@cerebras/cerebras_cloud_sdk": "^1.50.0",
