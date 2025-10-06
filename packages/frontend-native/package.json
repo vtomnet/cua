@@ -8,13 +8,13 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
-    "electrobun": "latest",
+    "electrobun": "^0.1.7",
     "frontend-core": "workspace:*",
-    "whisper-feature-extractor": "workspace:*",
     "llama-tokenizer-js": "^1.2.2",
     "onnxruntime-web": "^1.23.0",
     "openai": "^6.1.0",
-    "tailwindcss": "^4.1.14"
+    "tailwindcss": "^4.1.14",
+    "whisper-feature-extractor": "workspace:*"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^6.2.1",
