@@ -157,6 +157,7 @@ export class VadIterator {
   }
 
   async init(): Promise<void> {
+    ort.env.wasm.wasmPaths = "http://localhost:3000/onnx/";
     this.session = await ort.InferenceSession.create(this.modelPath, {
       executionProviders: ["wasm"], // or "webgl"
     });
@@ -272,7 +273,7 @@ export class SmartTurnV3 {
   private initialized: boolean = false;
 
   constructor(
-    modelPath = "/models/smart-turn-v3.0.onnx",
+    modelPath = "http://localhost:3000/models/smart-turn-v3.0.onnx",
     chunkLength = 8,
     sampleRate = 16000,
     nSeconds = 8
@@ -392,28 +393,28 @@ export class Moonshine {
       // Load all four ONNX sessions
       console.log("Loading preprocess...");
       this.model.preprocess = await ort.InferenceSession.create(
-        `/models/${this.modelName}/preprocess.onnx`,
+        `http://localhost:3000/models/${this.modelName}/preprocess.onnx`,
         { executionProviders: ["wasm", "cpu"] }
       );
       console.log("preprocess loaded");
 
       console.log("Loading encode...");
       this.model.encode = await ort.InferenceSession.create(
-        `/models/${this.modelName}/encode.onnx`,
+        `http://localhost:3000/models/${this.modelName}/encode.onnx`,
         { executionProviders: ["wasm", "cpu"] }
       );
       console.log("encode loaded");
 
       console.log("Loading uncached_decode...");
       this.model.uncached_decode = await ort.InferenceSession.create(
-        `/models/${this.modelName}/uncached_decode.onnx`,
+        `http://localhost:3000/models/${this.modelName}/uncached_decode.onnx`,
         { executionProviders: ["wasm", "cpu"] }
       );
       console.log("uncached_decode loaded");
 
       console.log("Loading cached_decode...");
       this.model.cached_decode = await ort.InferenceSession.create(
-        `/models/${this.modelName}/cached_decode.onnx`,
+        `http://localhost:3000/models/${this.modelName}/cached_decode.onnx`,
         { executionProviders: ["wasm", "cpu"] }
       );
       console.log("cached_decode loaded");

@@ -390,7 +390,7 @@
   async function initializeModelsLocal() {
     try {
       updateStatus('Initializing VAD model...', 'loading');
-      vad = new VadIterator("/models/silero_vad.onnx");
+      vad = new VadIterator("http://localhost:3000/models/silero_vad.onnx");
       await vad.init();
       updateStatus('VAD loaded, initializing Smart Turn v3...', 'loading');
 
