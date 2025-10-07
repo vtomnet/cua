@@ -1,28 +1,33 @@
 {
   "name": "frontend-native",
   "version": "0.0.1",
+  "main": "./dist/main/index.js",
   "scripts": {
-    "dev": "electrobun dev",
-    "build": "vite build && electrobun build",
-    "start": "bun run build && bun run dev",
-    "link-electrobun": "mkdir -p node_modules && ln -sf ../../../node_modules/electrobun node_modules/electrobun"
+    "dev:react": "vite",
+    "build:react": "vite build",
+    "build:electron": "bun build main.ts --target=node --outdir=dist-electron && bun build preload.ts --target=node --outdir=dist-electron",
+    "dev:electron": "VITE_DEV_SERVER_URL=http://localhost:5173 bun run dist-electron/main.js",
+    "start": "bun run dev:react & bun run build:electron && bun run dev:electron"
   },
   "dependencies": {
     "@jitsi/robotjs": "^0.6.18",
     "@tailwindcss/vite": "^4.1.14",
-    "electrobun": "^0.1.7",
     "frontend-core": "workspace:*",
     "llama-tokenizer-js": "^1.2.2",
     "onnxruntime-web": "^1.23.0",
     "openai": "^6.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tailwindcss": "^4.1.14",
     "whisper-feature-extractor": "workspace:*"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^6.2.1",
-    "@tsconfig/svelte": "^5.0.5",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
     "@types/bun": "latest",
     "concurrently": "^9.2.1",
-    "svelte": "^5.39.8"
+    "electron": "^38.2.1",
+    "electron-vite": "^4.0.1"
   }
 }
