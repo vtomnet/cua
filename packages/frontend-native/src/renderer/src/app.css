@@ -7,6 +7,10 @@ body {
     height: 100vh;
 }
 
+body, html, main {
+    background: transparent;
+}
+
 main {
     min-height: 100vh;
     height: 100vh;
