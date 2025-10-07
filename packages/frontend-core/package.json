@@ -11,5 +11,8 @@
   },
   "dependencies": {
     "core": "workspace:*"
+  },
+  "devDependencies": {
+    "svelte": "^5.39.10"
   }
 }

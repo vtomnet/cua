@@ -8,6 +8,7 @@
   "trustedDependencies": [
     "@jitsi/robotjs",
     "@tailwindcss/oxide",
+    "electron",
     "esbuild",
     "node-datachannel",
     "protobufjs"
