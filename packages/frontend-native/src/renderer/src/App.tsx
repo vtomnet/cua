@@ -692,23 +692,16 @@ const App = (): JSX.Element => {
   }, [openaiResponses, transcriptions]);
 
   return (
-    <main className="p-4 md:p-8 font-sans leading-relaxed text-gray-800 bg-white">
-      <h1 className="text-4xl font-semibold mb-4 text-gray-900 leading-tight">
-        Voice Activity Detection
-      </h1>
-
-      <div
-        className={`status p-4 my-4 rounded-lg font-semibold border transition-all duration-200 ease-in-out ${statusClass}`}
-      >
+    <main className="p-4 md:p-8 font-sans leading-relaxed text-gray-800">
+      <div className={`status p-4 my-4 rounded-lg font-semibold border transition-all duration-200 ease-in-out ${statusClass}`}>
         {status}
       </div>
 
-      <div className="relative mb-8 h-64 w-full overflow-hidden rounded-2xl border border-cyan-400/30 bg-gradient-to-br from-slate-900 via-slate-950 to-black shadow-inner md:h-80">
+      <div className="relative mb-8 h-64 w-full overflow-hidden rounded-2xl border border-cyan-400/30 bg-transparent shadow-inner md:h-80">
         <OrbVisualizer analyser={visualizerAnalyser} isRecording={isRecording} />
       </div>
 
       <div className="bg-slate-50 p-6 my-8 rounded-lg border border-gray-200">
-        <h2 className="text-3xl font-medium mb-4 text-gray-700">Microphone Recording</h2>
         <button
           onClick={startRecording}
           disabled={isRecording}
@@ -723,26 +716,6 @@ const App = (): JSX.Element => {
         >
           Stop Recording
         </button>
-      </div>
-
-      <div className="mt-8 p-6 bg-white rounded-lg border border-gray-200 shadow-sm">
-        <h3 className="text-2xl font-medium mb-4 text-gray-600">Speech Segments:</h3>
-        <div className="mt-4">
-          {speechSegments.length === 0 ? (
-            <p className="text-gray-500">No speech segments detected.</p>
-          ) : (
-            speechSegments.map((segment, index) => (
-              <div
-                key={`${segment.start}-${segment.end}-${index}`}
-                className="px-4 py-3 my-2 bg-slate-100 border-l-4 border-blue-500 rounded-r text-sm font-mono"
-              >
-                Segment {index + 1}: {Math.round((segment.start / 16000) * 100) / 100}s -
-                {" "}
-                {Math.round((segment.end / 16000) * 100) / 100}s
-              </div>
-            ))
-          )}
-        </div>
       </div>
 
       <div className="mt-8 p-6 bg-white rounded-lg border border-gray-200 shadow-sm">
@@ -767,12 +740,6 @@ const App = (): JSX.Element => {
             )
           ))}
         </div>
-      </div>
-
-      <div className="mt-8 p-4 text-sm text-gray-500 bg-gray-50 rounded-md border border-gray-200">
-        Click "Start Recording" to begin recording from your microphone. The system will
-        detect speech segments using VAD, transcribe them with OpenAI's API on speech end or
-        every 5 seconds, and forward transcripts to the local generator service for replies.
       </div>
     </main>
   );

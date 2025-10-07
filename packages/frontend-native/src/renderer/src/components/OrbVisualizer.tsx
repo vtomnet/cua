@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
 type OrbVisualizerProps = {
@@ -43,10 +44,14 @@ const OrbVisualizer = ({ analyser, isRecording }: OrbVisualizerProps): JSX.Eleme
     renderer.setPixelRatio(window.devicePixelRatio || 1);
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.setClearColor(0x000000, 0);
+    renderer.setClearAlpha(0);
     rendererRef.current = renderer;
+    renderer.domElement.style.backgroundColor = "transparent";
+    renderer.domElement.style.background = "transparent";
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
+    scene.background = null;
     const camera = new THREE.PerspectiveCamera(
       75,
       mount.clientWidth / mount.clientHeight,
@@ -75,15 +80,61 @@ const OrbVisualizer = ({ analyser, isRecording }: OrbVisualizerProps): JSX.Eleme
     scene.add(ambient);
 
     const composer = new EffectComposer(renderer);
+    composer.renderTarget1.texture.format = THREE.RGBAFormat;
+    composer.renderTarget2.texture.format = THREE.RGBAFormat;
+
     const renderPass = new RenderPass(scene, camera);
+    renderPass.clear = true;
+    renderPass.clearAlpha = 0;
+
     const bloomPass = new UnrealBloomPass(
       new THREE.Vector2(mount.clientWidth, mount.clientHeight),
       1.5,
       0.4,
       0.85,
     );
+
     composer.addPass(renderPass);
     composer.addPass(bloomPass);
+
+    const blendMaterial = bloomPass.blendMaterial;
+    blendMaterial.blending = THREE.CustomBlending;
+    blendMaterial.blendSrc = THREE.OneFactor;
+    blendMaterial.blendDst = THREE.OneFactor;
+    blendMaterial.blendEquation = THREE.AddEquation;
+    blendMaterial.blendSrcAlpha = THREE.ZeroFactor;
+    blendMaterial.blendDstAlpha = THREE.OneFactor;
+    blendMaterial.blendEquationAlpha = THREE.AddEquation;
+
+    const transparentOutputPass = new ShaderPass(
+      new THREE.ShaderMaterial({
+        uniforms: {
+          baseTexture: { value: null },
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform sampler2D baseTexture;
+          varying vec2 vUv;
+          void main() {
+            vec4 color = texture2D(baseTexture, vUv);
+            float intensity = max(max(color.r, color.g), color.b);
+            float alpha = step(0.02, intensity);
+            gl_FragColor = vec4(color.rgb, alpha);
+          }
+        `,
+        transparent: true,
+        depthWrite: false,
+      }),
+      "baseTexture",
+    );
+
+    composer.addPass(transparentOutputPass);
     composerRef.current = composer;
 
     clockRef.current.start();
@@ -157,6 +208,8 @@ const OrbVisualizer = ({ analyser, isRecording }: OrbVisualizerProps): JSX.Eleme
 
       window.removeEventListener("resize", handleResize);
 
+      transparentOutputPass.dispose();
+      bloomPass.dispose();
       composer.dispose();
       renderer.dispose();
 
@@ -178,8 +231,8 @@ const OrbVisualizer = ({ analyser, isRecording }: OrbVisualizerProps): JSX.Eleme
   }, [isRecording]);
 
   return (
-    <div className="relative h-full w-full">
-      <div ref={mountRef} className="absolute inset-0" />
+    <div className="relative h-full w-full bg-transparent">
+      <div ref={mountRef} className="absolute inset-0 bg-transparent" />
       <div className="pointer-events-none absolute inset-x-0 bottom-4 text-center text-xs uppercase tracking-[0.35em] text-cyan-100/80">
         {isRecording ? "Listening" : "Visualizer Idle"}
       </div>
