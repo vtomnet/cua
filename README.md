@@ -28,4 +28,4 @@ bun install
 (cd packages/frontend-native && bun run build)
 ```
 
-Now you may run `bun dev` / `bun run build` from any package directory. You may need to rebuild packages/core or packages/frontend-core after updating them.
+Now you may run `bun run build` / `bun dev` from any package directory. You may need to rebuild packages/core or packages/frontend-core after updating them.

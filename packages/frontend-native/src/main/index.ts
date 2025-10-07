@@ -7,13 +7,18 @@ function createWindow() {
     height: 600,
     frame: false,
     transparent: true,
-    resizable: false,
+    resizable: true,
     hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),  // Built preload
       nodeIntegration: false,
       contextIsolation: true
     }
+  });
+
+  win.once('ready-to-show', () => {
+    win.maximize();
+    win.setResizable(false);  // Keep previous non-resizable behavior after maximizing
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
