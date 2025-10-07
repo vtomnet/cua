@@ -1,4 +1,7 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
+import { execFile } from "child_process";
+import { promisify } from "util";
+import robot from "@jitsi/robotjs";
 import path from 'path';
 
 function createWindow() {
@@ -26,6 +29,28 @@ function createWindow() {
   } else {
     win.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
+}
+
+ipcMain.handle("open-tool", async (event: any, data: any) => {
+  console.log("Received from renderer:", data);
+
+  const result = await openTool(data);
+  return result;
+});
+
+const execFileAsync = promisify(execFile);
+
+async function openTool(data: any): Promise<{ stdout: string, stderr: string }> {
+  if (!data?.thing) throw new Error('missing data.thing');
+
+  const { stdout, stderr } = (await execFileAsync('/usr/bin/open', [data.thing])) as {
+    stdout: string;
+    stderr: string;
+  };
+
+  console.log("stdout:", stdout);
+  console.error("stderr:", stderr);
+  return { stdout: stdout ?? '', stderr: stderr ?? '' };
 }
 
 app.whenReady().then(createWindow);

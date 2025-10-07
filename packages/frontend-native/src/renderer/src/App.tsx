@@ -212,6 +212,10 @@ const App = (): JSX.Element => {
         }
         const argsStr = typeof args === "string" ? args : JSON.stringify(args);
         responseLines.push(`Called ${toolName}(${argsStr})`);
+        if (toolName === "open") {
+          const result = await window.electronAPI.openTool(args);
+          console.log("Result from openTool:", result);
+        }
       }
 
       if (!responseLines.length) {
