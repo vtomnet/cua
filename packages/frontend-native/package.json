@@ -3,11 +3,13 @@
   "version": "0.0.1",
   "main": "./dist/main/index.js",
   "scripts": {
-    "dev:react": "vite",
-    "build:react": "vite build",
-    "build:electron": "bun build main.ts --target=node --outdir=dist-electron && bun build preload.ts --target=node --outdir=dist-electron",
-    "dev:electron": "VITE_DEV_SERVER_URL=http://localhost:5173 bun run dist-electron/main.js",
-    "start": "bun run dev:react & bun run build:electron && bun run dev:electron"
+    "build": "electron-vite build",
+    "dev": "electron-vite dev",
+    "//dev:react": "vite",
+    "//build:react": "vite build",
+    "//build:electron": "bun build main.ts --target=node --outdir=dist-electron && bun build preload.ts --target=node --outdir=dist-electron",
+    "//dev:electron": "VITE_DEV_SERVER_URL=http://localhost:5173 bun run dist-electron/main.js",
+    "//start": "bun run dev:react & bun run build:electron && bun run dev:electron"
   },
   "dependencies": {
     "@jitsi/robotjs": "^0.6.18",
