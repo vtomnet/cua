@@ -5,6 +5,10 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 800,
     height: 600,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),  // Built preload
       nodeIntegration: false,

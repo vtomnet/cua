@@ -7,6 +7,7 @@ import {
   Timestamp,
 } from "frontend-core";
 import "./app.css";
+import OrbVisualizer from "./components/OrbVisualizer";
 
 type Message = {
   text: string;
@@ -37,12 +38,16 @@ const App = (): JSX.Element => {
   const [openaiResponses, setOpenaiResponses] = useState<
     Array<{ text: string; timestamp: number }>
   >([]);
+  const [visualizerAnalyser, setVisualizerAnalyser] = useState<
+    AnalyserNode | null
+  >(null);
 
   const vadRef = useRef<VadIterator | null>(null);
   const openaiTranscriptionRef = useRef<OpenAIRealtimeTranscription | null>(null);
   const smartTurnRef = useRef<SmartTurnV3 | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const analyserNodeRef = useRef<AnalyserNode | null>(null);
   const recordedChunksRef = useRef<Float32Array[]>([]);
   const lastTranscriptionTimeRef = useRef(0);
   const currentSpeechBufferRef = useRef<Float32Array[]>([]);
@@ -126,6 +131,18 @@ const App = (): JSX.Element => {
     }
 
     return output;
+  };
+
+  const clearVisualizerAnalyser = () => {
+    if (analyserNodeRef.current) {
+      try {
+        analyserNodeRef.current.disconnect();
+      } catch (error) {
+        console.warn("analyser disconnect failed", error);
+      }
+      analyserNodeRef.current = null;
+    }
+    setVisualizerAnalyser(null);
   };
 
   const sendToOpenAI = async (transcription: string) => {
@@ -515,6 +532,7 @@ const App = (): JSX.Element => {
         if (!initialized) {
           stream.getTracks().forEach((track) => track.stop());
           mediaStreamRef.current = null;
+          clearVisualizerAnalyser();
           return;
         }
       }
@@ -535,6 +553,13 @@ const App = (): JSX.Element => {
         recordedChunksRef.current.push(audioChunk);
         await processAudioChunkLocal(audioChunk);
       };
+
+      const analyserNode = audioContext.createAnalyser();
+      analyserNode.fftSize = 256;
+      analyserNode.smoothingTimeConstant = 0.8;
+      source.connect(analyserNode);
+      analyserNodeRef.current = analyserNode;
+      setVisualizerAnalyser(analyserNode);
 
       source.connect(processorNode);
       processorNode.connect(audioContext.destination);
@@ -557,6 +582,7 @@ const App = (): JSX.Element => {
       updateStatus("Recording... Speak into your microphone", "recording");
     } catch (error) {
       console.error("Error starting recording:", error);
+      clearVisualizerAnalyser();
       setIsRecording(false);
       updateStatus("Failed to access microphone", "error");
     }
@@ -568,6 +594,7 @@ const App = (): JSX.Element => {
     }
 
     setIsRecording(false);
+    clearVisualizerAnalyser();
 
     if (silenceTimeoutRef.current !== null) {
       clearTimeout(silenceTimeoutRef.current);
@@ -642,6 +669,8 @@ const App = (): JSX.Element => {
         silenceTimeoutRef.current = null;
       }
 
+      clearVisualizerAnalyser();
+
       const context = audioContextRef.current;
       if (context) {
         context.close().catch(() => undefined);
@@ -672,6 +701,10 @@ const App = (): JSX.Element => {
         className={`status p-4 my-4 rounded-lg font-semibold border transition-all duration-200 ease-in-out ${statusClass}`}
       >
         {status}
+      </div>
+
+      <div className="relative mb-8 h-64 w-full overflow-hidden rounded-2xl border border-cyan-400/30 bg-gradient-to-br from-slate-900 via-slate-950 to-black shadow-inner md:h-80">
+        <OrbVisualizer analyser={visualizerAnalyser} isRecording={isRecording} />
       </div>
 
       <div className="bg-slate-50 p-6 my-8 rounded-lg border border-gray-200">
