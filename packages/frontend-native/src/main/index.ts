@@ -1,8 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { execFile } from "child_process";
-import { promisify } from "util";
-import robot from "@jitsi/robotjs";
 import path from 'path';
+import { openTool, scrollTool, type ToolResult } from "./tools";
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -12,6 +10,7 @@ function createWindow() {
     transparent: true,
     resizable: true,
     hasShadow: false,
+    alwaysOnTop: true,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),  // Built preload
       nodeIntegration: false,
@@ -32,26 +31,18 @@ function createWindow() {
 }
 
 ipcMain.handle("open-tool", async (event: any, data: any) => {
-  console.log("Received from renderer:", data);
+  console.log("Open tool received from renderer:", data);
 
   const result = await openTool(data);
   return result;
 });
 
-const execFileAsync = promisify(execFile);
+ipcMain.handle("scroll-tool", async (event: any, data: any) => {
+  console.log("Scroll tool received from renderer:", data);
 
-async function openTool(data: any): Promise<{ stdout: string, stderr: string }> {
-  if (!data?.thing) throw new Error('missing data.thing');
-
-  const { stdout, stderr } = (await execFileAsync('/usr/bin/open', [data.thing])) as {
-    stdout: string;
-    stderr: string;
-  };
-
-  console.log("stdout:", stdout);
-  console.error("stderr:", stderr);
-  return { stdout: stdout ?? '', stderr: stderr ?? '' };
-}
+  const result = await scrollTool(data);
+  return result;
+});
 
 app.whenReady().then(createWindow);
 

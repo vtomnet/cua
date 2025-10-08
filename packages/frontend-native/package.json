@@ -16,6 +16,7 @@
     "@react-three/fiber": "^8.17.14",
     "@tailwindcss/vite": "^4.1.14",
     "frontend-core": "workspace:*",
+    "open-things": "workspace:*",
     "llama-tokenizer-js": "^1.2.2",
     "onnxruntime-web": "^1.23.0",
     "openai": "^6.1.0",
