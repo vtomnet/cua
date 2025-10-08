@@ -5,6 +5,7 @@
   "scripts": {
     "build": "electron-vite build",
     "dev": "electron-vite dev",
+    "start": "bun run build && bun run dev",
     "//dev:react": "vite",
     "//build:react": "vite build",
     "//build:electron": "bun build main.ts --target=node --outdir=dist-electron && bun build preload.ts --target=node --outdir=dist-electron",
