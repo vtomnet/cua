@@ -7,52 +7,124 @@
     <style>
         body {
             margin: 0;
-            padding: 20px;
+            padding: 0;
             font-family: Arial, sans-serif;
             background-color: #1e1e1e;
             color: white;
+            overflow: hidden;
         }
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .video-container {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-
-        video, canvas {
-            border: 2px solid #333;
-            border-radius: 8px;
-        }
-
-        #webcam {
-            width: 640px;
-            height: 480px;
+        #bgFrame {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            border: none;
+            z-index: 0;
         }
 
         #gazeCanvas {
-            width: 640px;
-            height: 480px;
-            background-color: black;
+            position: fixed;
+            top: 0;
+            left: 0;
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            background-color: transparent;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .debug-feeds {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 12px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 10px;
+            border: 1px solid rgba(76, 175, 80, 0.6);
+            box-shadow: 0 0 12px rgba(0, 0, 0, 0.6);
+            z-index: 2;
+        }
+
+        .debug-feeds video {
+            width: 320px;
+            max-width: 30vw;
+            aspect-ratio: 16 / 9;
+            border: 2px solid #4CAF50;
+            border-radius: 8px;
+            background: #000;
+            pointer-events: none;
+            object-fit: cover;
+        }
+
+        .eye-previews {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            justify-content: space-between;
+        }
+
+        .eye-preview {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .eye-preview span {
+            font-size: 14px;
+            color: #b0ffb3;
+        }
+
+        .eye-preview canvas {
+            width: 120px;
+            height: 72px;
+            background: #111;
+            border: 2px solid rgba(76, 175, 80, 0.8);
+            border-radius: 6px;
+        }
+
+        .overlay {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 12px 16px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 140px;
+            z-index: 3;
+        }
+
+        .overlay span {
+            color: #4CAF50;
+            font-weight: bold;
         }
 
         .controls {
-            margin-bottom: 20px;
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            display: flex;
+            gap: 12px;
+            z-index: 3;
         }
 
         button {
             background-color: #4CAF50;
             color: white;
             border: none;
-            padding: 10px 20px;
-            margin-right: 10px;
+            padding: 10px 18px;
             border-radius: 4px;
             cursor: pointer;
             font-size: 16px;
+            transition: background-color 0.2s ease-in-out;
         }
 
         button:hover {
@@ -63,117 +135,34 @@
             background-color: #666;
             cursor: not-allowed;
         }
-
-        .status {
-            margin-top: 20px;
-            padding: 10px;
-            background-color: #333;
-            border-radius: 4px;
-        }
-
-        .error {
-            background-color: #d32f2f;
-        }
-
-        .success {
-            background-color: #2e7d32;
-        }
-
-        .info {
-            background-color: #1976d2;
-        }
-
-        .eye-preview {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
-
-        .eye-preview canvas {
-            width: 120px;
-            height: 72px;
-            border: 1px solid #555;
-        }
-
-        .stats {
-            margin-top: 20px;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 10px;
-        }
-
-        .stat-item {
-            background-color: #333;
-            padding: 10px;
-            border-radius: 4px;
-        }
-
-        .stat-label {
-            font-weight: bold;
-            color: #ccc;
-        }
-
-        .stat-value {
-            font-size: 1.2em;
-            color: #4CAF50;
-        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>RageNet Web Eye Tracker</h1>
-
-        <div class="controls">
-            <button id="initBtn">Init</button>
-            <button id="startBtn">Start Tracking</button>
-            <button id="stopBtn" disabled>Stop Tracking</button>
-            <button id="calibrateBtn" disabled>Calibrate</button>
-        </div>
-
-        <div class="video-container">
-            <div>
-                <h3>Webcam Feed</h3>
-                <video id="webcam" autoplay muted></video>
+    <iframe id="bgFrame" src="https://www.wikipedia.org/wiki/Linux"></iframe>
+    <canvas id="gazeCanvas"></canvas>
+    <div class="debug-feeds" id="debugFeeds">
+        <video id="webcam" autoplay muted playsinline></video>
+        <div class="eye-previews">
+            <div class="eye-preview">
+                <span>Right Eye</span>
+                <canvas id="rightEyeDebug"></canvas>
             </div>
-            <div>
-                <h3>Gaze Tracking</h3>
-                <canvas id="gazeCanvas"></canvas>
+            <div class="eye-preview">
+                <span>Left Eye</span>
+                <canvas id="leftEyeDebug"></canvas>
             </div>
         </div>
-
-        <div class="eye-preview">
-            <div>
-                <h4>Right Eye</h4>
-                <canvas id="rightEyeCanvas" width="60" height="36"></canvas>
-            </div>
-            <div>
-                <h4>Left Eye</h4>
-                <canvas id="leftEyeCanvas" width="60" height="36"></canvas>
-            </div>
-        </div>
-
-        <div class="stats">
-            <div class="stat-item">
-                <div class="stat-label">Gaze X</div>
-                <div class="stat-value" id="gazeX">-</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Gaze Y</div>
-                <div class="stat-value" id="gazeY">-</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">FPS</div>
-                <div class="stat-value" id="fps">-</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Status</div>
-                <div class="stat-value" id="trackingStatus">Stopped</div>
-            </div>
-        </div>
-
-        <div id="statusMessage" class="status">Ready to start eye tracking</div>
     </div>
-
+    <div class="overlay">
+        <div>Gaze X: <span id="gazeX">-</span></div>
+        <div>Gaze Y: <span id="gazeY">-</span></div>
+        <div>FPS: <span id="fps">-</span></div>
+    </div>
+    <div class="controls">
+        <button id="fullscreenBtn">Enter Fullscreen</button>
+        <button id="startBtn">Start Tracking</button>
+        <button id="stopBtn" disabled>Stop Tracking</button>
+    </div>
     <script type="module" src="/main.js"></script>
 </body>
 </html>

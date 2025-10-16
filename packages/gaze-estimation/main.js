@@ -22,6 +22,8 @@ const CAMERA_DISTORTION = [0.08599595, -0.37972518, -0.0059906, -0.00468435, 0.4
 const EYE_ROI_SIZE = [60, 36];
 const FOCAL_LENGTH_NORM = 960;
 const DISTANCE_NORM = 600;
+const PREPROCESS_WIDTH = 36;
+const PREPROCESS_HEIGHT = 60;
 
 // 3D face coordinates from c.py
 const GENERIC_3D_FACE_COORDINATES = [
@@ -31,7 +33,7 @@ const GENERIC_3D_FACE_COORDINATES = [
 ];
 
 class MixedNormalizer {
-    constructor(cv) {
+    constructor() {
         this.focalLengthNorm = FOCAL_LENGTH_NORM;
         this.distanceNorm = DISTANCE_NORM;
         this.eyeRoiSize = EYE_ROI_SIZE;
@@ -327,12 +329,20 @@ class RageNetPredictor {
         this.isInitialized = false;
         this.inputNames = null;
         this.outputName = null;
+        this.preprocessCanvas = document.createElement('canvas');
+        this.preprocessCanvas.width = PREPROCESS_WIDTH;
+        this.preprocessCanvas.height = PREPROCESS_HEIGHT;
+        this.preprocessCtx = this.preprocessCanvas.getContext('2d', { willReadFrequently: true });
+        this.rightBuffer = new Float32Array(PREPROCESS_WIDTH * PREPROCESS_HEIGHT);
+        this.leftBuffer = new Float32Array(PREPROCESS_WIDTH * PREPROCESS_HEIGHT);
+        this.rightTensor = new ort.Tensor('float32', this.rightBuffer, [1, PREPROCESS_HEIGHT, PREPROCESS_WIDTH, 1]);
+        this.leftTensor = new ort.Tensor('float32', this.leftBuffer, [1, PREPROCESS_HEIGHT, PREPROCESS_WIDTH, 1]);
     }
 
     async initialize() {
         try {
-            this.session = await ort.InferenceSession.create('/rn_sw_attention.onnx', {
-                executionProviders: ["webgpu", "webgl"],
+            this.session = await ort.InferenceSession.create('https://x.vtom.net/rn_sw_attention.onnx', {
+                executionProviders: ["webgpu", "wasm"],
             });
 
             this.inputNames = this.session.inputNames;
@@ -348,58 +358,25 @@ class RageNetPredictor {
         }
     }
 
-    preprocessEye(canvas) {
-        const ctx = canvas.getContext('2d');
+    prepareEye(sourceCanvas, targetBuffer) {
+        this.preprocessCtx.drawImage(
+            sourceCanvas,
+            0,
+            0,
+            PREPROCESS_WIDTH,
+            PREPROCESS_HEIGHT
+        );
 
-        // Resize to 36x60
-        const resizedCanvas = document.createElement('canvas');
-        resizedCanvas.width = 36;
-        resizedCanvas.height = 60;
-        const resizedCtx = resizedCanvas.getContext('2d');
-        resizedCtx.drawImage(canvas, 0, 0, 36, 60);
+        const data = this.preprocessCtx
+            .getImageData(0, 0, PREPROCESS_WIDTH, PREPROCESS_HEIGHT)
+            .data;
 
-        const imageData = resizedCtx.getImageData(0, 0, 36, 60);
-        const data = imageData.data;
-
-        const eyeArray = new Float32Array(60 * 36);
-        for (let i = 0; i < data.length; i += 4) {
-            const gray = data[i]; // Red channel as grayscale
-
-            // --- START: CORRECTED NORMALIZATION LOGIC ---
-            // Replicate the exact two-step process from the Python script
-            const val_0_to_1 = gray / 255.0;
-            eyeArray[i / 4] = (val_0_to_1 - 128.0) / 128.0;
-            // --- END: CORRECTED NORMALIZATION LOGIC ---
+        for (let srcIndex = 0, dstIndex = 0; srcIndex < data.length; srcIndex += 4, dstIndex++) {
+            const gray = data[srcIndex];
+            const normalized = gray / 255.0;
+            // Preserve legacy double-normalization used during model training
+            targetBuffer[dstIndex] = (normalized - 128.0) / 128.0;
         }
-
-        // Reshape to [1, 60, 36, 1]
-        return new ort.Tensor('float32', eyeArray, [1, 60, 36, 1]);
-    }
-
-    preprocessEyeOld(canvas) {
-        const ctx = canvas.getContext('2d');
-
-        // Resize to 36x60 (matching Python: height=60, width=36)
-        const resizedCanvas = document.createElement('canvas');
-        resizedCanvas.width = 36;
-        resizedCanvas.height = 60;
-        const resizedCtx = resizedCanvas.getContext('2d');
-        resizedCtx.drawImage(canvas, 0, 0, 36, 60);
-
-        const imageData = resizedCtx.getImageData(0, 0, 36, 60);
-        const data = imageData.data;
-
-        // Convert to grayscale float32 array normalized to [-1, 1]
-        const eyeArray = new Float32Array(60 * 36);
-        for (let i = 0; i < data.length; i += 4) {
-            const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-            eyeArray[i / 4] = (gray - 128.0) / 128.0;
-            // const gray = data[i]; // Red channel as grayscale
-            // eyeArray[i / 4] = (gray / 255.0 - 0.5) * 2.0;
-        }
-
-        // Reshape to [1, 60, 36, 1]
-        return new ort.Tensor('float32', eyeArray, [1, 60, 36, 1]);
     }
 
     async predict(rightEyeCanvas, leftEyeCanvas) {
@@ -407,16 +384,23 @@ class RageNetPredictor {
             throw new Error("ONNX model not initialized");
         }
 
-        const rightEyeTensor = this.preprocessEye(rightEyeCanvas);
-        const leftEyeTensor = this.preprocessEye(leftEyeCanvas);
+        this.prepareEye(rightEyeCanvas, this.rightBuffer);
+        this.prepareEye(leftEyeCanvas, this.leftBuffer);
 
         const feeds = {
-            [this.inputNames[0]]: rightEyeTensor,
-            [this.inputNames[1]]: leftEyeTensor
+            [this.inputNames[0]]: this.rightTensor,
+            [this.inputNames[1]]: this.leftTensor
         };
 
         const results = await this.session.run(feeds);
         const prediction = results[this.outputName];
+
+        console.log('[Model] Gaze predictor output:', {
+            tensorName: this.outputName,
+            x: prediction.data[0],
+            y: prediction.data[1],
+            raw: prediction.data
+        });
 
         return {
             x: prediction.data[0],
@@ -426,227 +410,307 @@ class RageNetPredictor {
 }
 
 class EyeTracker {
-    constructor() {
-        this.normalizer = new MixedNormalizer();
-        this.predictor = new RageNetPredictor();
-        this.isRunning = false;
-        this.video = null;
-        this.canvas = null;
-        this.ctx = null;
-        this.gazeCanvas = null;
-        this.gazeCtx = null;
-        this.rightEyeCanvas = null;
-        this.leftEyeCanvas = null;
-        this.animationId = null;
-        this.frameCount = 0;
-        this.lastFpsUpdate = 0;
-        this.screenWidth = window.screen.width;
-        this.screenHeight = window.screen.height;
+  constructor() {
+    this.normalizer = new MixedNormalizer();
+    this.predictor = new RageNetPredictor();
+    this.isRunning = false;
+    this.isInitialized = false;
+    this.video = null;
+    this.canvas = null;
+    this.ctx = null;
+    this.gazeCanvas = null;
+    this.gazeCtx = null;
+    this.overlayElements = null;
+    this.animationId = null;
+    this.frameCount = 0;
+    this.lastFpsUpdate = 0;
+    this.viewportWidth = window.innerWidth;
+    this.viewportHeight = window.innerHeight;
+    this.resizeHandler = null;
+    this.rightEyeDebugCanvas = null;
+    this.leftEyeDebugCanvas = null;
+    this.rightEyeDebugCtx = null;
+    this.leftEyeDebugCtx = null;
+  }
+
+  async initialize() {
+    try {
+      // Initialize components
+      await this.normalizer.initialize();
+      await this.predictor.initialize();
+
+      // Get DOM elements
+      this.video = document.getElementById('webcam');
+      this.gazeCanvas = document.getElementById('gazeCanvas');
+      this.gazeCtx = this.gazeCanvas.getContext('2d');
+      this.overlayElements = {
+        gazeX: document.getElementById('gazeX'),
+        gazeY: document.getElementById('gazeY'),
+        fps: document.getElementById('fps')
+      };
+      this.rightEyeDebugCanvas = document.getElementById('rightEyeDebug');
+      this.leftEyeDebugCanvas = document.getElementById('leftEyeDebug');
+
+      if (this.rightEyeDebugCanvas) {
+        this.rightEyeDebugCanvas.width = EYE_ROI_SIZE[0];
+        this.rightEyeDebugCanvas.height = EYE_ROI_SIZE[1];
+        this.rightEyeDebugCtx = this.rightEyeDebugCanvas.getContext('2d', { willReadFrequently: true });
+        this.rightEyeDebugCtx.imageSmoothingEnabled = false;
+      }
+
+      if (this.leftEyeDebugCanvas) {
+        this.leftEyeDebugCanvas.width = EYE_ROI_SIZE[0];
+        this.leftEyeDebugCanvas.height = EYE_ROI_SIZE[1];
+        this.leftEyeDebugCtx = this.leftEyeDebugCanvas.getContext('2d', { willReadFrequently: true });
+        this.leftEyeDebugCtx.imageSmoothingEnabled = false;
+      }
+
+      // Set up gaze canvas
+      if (!this.resizeHandler) {
+        this.resizeHandler = () => this.resizeCanvas();
+        window.addEventListener('resize', this.resizeHandler);
+      }
+      this.resizeCanvas();
+
+      // Create hidden canvas for video processing
+      this.canvas = document.createElement('canvas');
+      this.ctx = this.canvas.getContext('2d');
+
+      this.updateOverlay({ gazeX: null, gazeY: null, fps: null });
+      this.isInitialized = true;
+      return true;
+    } catch (error) {
+      throw new Error(`Failed to initialize eye tracker: ${error.message}`);
+    }
+  }
+
+  async startWebcam() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: 1920,
+            height: 1080,
+            frameRate: 30
+          }
+        });
+        this.video.srcObject = stream;
+
+        return new Promise((resolve) => {
+          this.video.onloadedmetadata = () => {
+            this.canvas.width = this.video.videoWidth;
+            this.canvas.height = this.video.videoHeight;
+            resolve();
+          };
+        });
+      } catch (error) {
+        throw new Error(`Failed to access webcam: ${error.message}`);
+      }
+  }
+
+  stopWebcam() {
+    if (this.video && this.video.srcObject) {
+      const tracks = this.video.srcObject.getTracks();
+      tracks.forEach(track => track.stop());
+      this.video.srcObject = null;
+    }
+  }
+
+  resizeCanvas() {
+    if (!this.gazeCanvas) {
+      return;
+    }
+    this.viewportWidth = window.innerWidth;
+    this.viewportHeight = window.innerHeight;
+    this.gazeCanvas.width = this.viewportWidth;
+    this.gazeCanvas.height = this.viewportHeight;
+  }
+
+  updateOverlay({ gazeX, gazeY, fps } = {}) {
+    if (!this.overlayElements) {
+      return;
     }
 
-    async initialize() {
-        try {
-            // Initialize components
-            await this.normalizer.initialize();
-            await this.predictor.initialize();
-
-            // Get DOM elements
-            this.video = document.getElementById('webcam');
-            this.gazeCanvas = document.getElementById('gazeCanvas');
-            this.gazeCtx = this.gazeCanvas.getContext('2d');
-            this.rightEyeCanvas = document.getElementById('rightEyeCanvas');
-            this.leftEyeCanvas = document.getElementById('leftEyeCanvas');
-
-            // Set up gaze canvas
-            this.gazeCanvas.width = this.screenWidth;
-            this.gazeCanvas.height = this.screenHeight;
-
-            // Create hidden canvas for video processing
-            this.canvas = document.createElement('canvas');
-            this.ctx = this.canvas.getContext('2d');
-
-            return true;
-        } catch (error) {
-            throw new Error(`Failed to initialize eye tracker: ${error.message}`);
-        }
+    if (gazeX !== undefined) {
+      this.overlayElements.gazeX.textContent = gazeX === null ? '-' : gazeX.toFixed(2);
     }
 
-    async startWebcam() {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    width: 1920,
-                    height: 1080,
-                    frameRate: 30
-                }
-            });
-            this.video.srcObject = stream;
-
-            return new Promise((resolve) => {
-                this.video.onloadedmetadata = () => {
-                    this.canvas.width = this.video.videoWidth;
-                    this.canvas.height = this.video.videoHeight;
-                    resolve();
-                };
-            });
-        } catch (error) {
-            throw new Error(`Failed to access webcam: ${error.message}`);
-        }
+    if (gazeY !== undefined) {
+      this.overlayElements.gazeY.textContent = gazeY === null ? '-' : gazeY.toFixed(2);
     }
 
-    stopWebcam() {
-        if (this.video && this.video.srcObject) {
-            const tracks = this.video.srcObject.getTracks();
-            tracks.forEach(track => track.stop());
-            this.video.srcObject = null;
-        }
+    if (fps !== undefined) {
+      this.overlayElements.fps.textContent = fps === null ? '-' : fps.toFixed(1);
     }
+  }
 
-    updateStatus(message, type = 'info') {
-        const statusElement = document.getElementById('statusMessage');
-        statusElement.textContent = message;
-        statusElement.className = `status ${type}`;
-    }
+  async processFrame() {
+    if (!this.isRunning) return;
 
-    updateStats(gazeX, gazeY, fps) {
-        document.getElementById('gazeX').textContent = gazeX !== null ? gazeX.toFixed(2) : '-';
-        document.getElementById('gazeY').textContent = gazeY !== null ? gazeY.toFixed(2) : '-';
-        document.getElementById('fps').textContent = fps.toFixed(1);
-        document.getElementById('trackingStatus').textContent = this.isRunning ? 'Running' : 'Stopped';
-    }
+    try {
+      // Draw video frame to hidden canvas
+      this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
 
-    async processFrame() {
-        if (!this.isRunning) return;
-
-        try {
-            // Draw video frame to hidden canvas
-            this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
-
-            // Normalize eyes
-            const [rightEyeCanvas, leftEyeCanvas] = this.normalizer.normalizeFrame(this.canvas);
-
-            // Update eye preview canvases
-            const rightCtx = this.rightEyeCanvas.getContext('2d');
-            const leftCtx = this.leftEyeCanvas.getContext('2d');
-            rightCtx.drawImage(rightEyeCanvas, 0, 0);
-            leftCtx.drawImage(leftEyeCanvas, 0, 0);
-
-            // Predict gaze
-            const prediction = await this.predictor.predict(rightEyeCanvas, leftEyeCanvas);
-            const gazeX = prediction.x * this.screenWidth;
-            const gazeY = prediction.y * this.screenHeight;
-
-            // Clamp to screen bounds
-            const clampedX = Math.max(0, Math.min(gazeX, this.screenWidth - 1));
-            const clampedY = Math.max(0, Math.min(gazeY, this.screenHeight - 1));
-
-            // Draw gaze point
-            this.gazeCtx.clearRect(0, 0, this.gazeCanvas.width, this.gazeCanvas.height);
-            this.gazeCtx.fillStyle = 'red';
-            this.gazeCtx.beginPath();
-            this.gazeCtx.arc(clampedX, clampedY, 15, 0, 2 * Math.PI);
-            this.gazeCtx.fill();
-
-            // Update stats
-            this.frameCount++;
-            const now = performance.now();
-            if (now - this.lastFpsUpdate > 1000) {
-                const fps = this.frameCount / ((now - this.lastFpsUpdate) / 1000);
-                this.updateStats(gazeX, gazeY, fps);
-                this.frameCount = 0;
-                this.lastFpsUpdate = now;
-            }
-
-            this.updateStatus('Tracking active', 'success');
-
-        } catch (error) {
-            this.updateStatus(`Tracking error: ${error.message}`, 'error');
-        }
-
+      const normalizedEyes = this.normalizer.normalizeFrame(this.canvas);
+      if (!normalizedEyes) {
+        this.updateOverlay({ gazeX: null, gazeY: null });
         this.animationId = requestAnimationFrame(() => this.processFrame());
+        return;
+      }
+
+      const [rightEyeCanvas, leftEyeCanvas] = normalizedEyes;
+
+      if (this.rightEyeDebugCtx && rightEyeCanvas) {
+        this.rightEyeDebugCtx.drawImage(
+          rightEyeCanvas,
+          0,
+          0,
+          this.rightEyeDebugCanvas.width,
+          this.rightEyeDebugCanvas.height
+        );
+      }
+
+      if (this.leftEyeDebugCtx && leftEyeCanvas) {
+        this.leftEyeDebugCtx.drawImage(
+          leftEyeCanvas,
+          0,
+          0,
+          this.leftEyeDebugCanvas.width,
+          this.leftEyeDebugCanvas.height
+        );
+      }
+
+      // Predict gaze
+      const prediction = await this.predictor.predict(rightEyeCanvas, leftEyeCanvas);
+      const gazeX = prediction.x * this.viewportWidth;
+      const gazeY = prediction.y * this.viewportHeight;
+
+      // Clamp to screen bounds
+      const clampedX = Math.max(0, Math.min(gazeX, this.viewportWidth - 1));
+      const clampedY = Math.max(0, Math.min(gazeY, this.viewportHeight - 1));
+
+      // Draw gaze point
+      this.gazeCtx.clearRect(0, 0, this.gazeCanvas.width, this.gazeCanvas.height);
+      this.gazeCtx.fillStyle = 'red';
+      this.gazeCtx.beginPath();
+      this.gazeCtx.arc(clampedX, clampedY, 15, 0, 2 * Math.PI);
+      this.gazeCtx.fill();
+
+      this.updateOverlay({ gazeX: clampedX, gazeY: clampedY });
+
+      // Update stats
+      this.frameCount++;
+      const now = performance.now();
+      if (now - this.lastFpsUpdate > 1000) {
+        const fps = this.frameCount / ((now - this.lastFpsUpdate) / 1000);
+        this.updateOverlay({ fps });
+        this.frameCount = 0;
+        this.lastFpsUpdate = now;
+      }
+    } catch (error) {
+        console.error('Tracking error:', error);
     }
 
-    async start() {
-        if (this.isRunning) return;
+    this.animationId = requestAnimationFrame(() => this.processFrame());
+  }
 
-        try {
-            this.updateStatus('Starting eye tracker...', 'info');
+  async start() {
+    if (this.isRunning) return;
 
-            await this.startWebcam();
-            this.isRunning = true;
-            this.lastFpsUpdate = performance.now();
-            this.processFrame();
+    try {
+      this.resizeCanvas();
+      await this.startWebcam();
+      this.isRunning = true;
+      this.lastFpsUpdate = performance.now();
+      this.frameCount = 0;
+      this.updateOverlay({ gazeX: null, gazeY: null, fps: 0 });
+      this.processFrame();
 
-            this.updateStatus('Eye tracking started', 'success');
-        } catch (error) {
-            this.updateStatus(`Failed to start: ${error.message}`, 'error');
-            this.stop();
-        }
+    } catch (error) {
+      console.error('Failed to start:', error);
+      this.stop();
+      throw error;
+    }
+  }
+
+  stop() {
+    this.isRunning = false;
+
+    if (this.animationId) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
     }
 
-    stop() {
-        this.isRunning = false;
+    this.stopWebcam();
 
-        if (this.animationId) {
-            cancelAnimationFrame(this.animationId);
-            this.animationId = null;
-        }
-
-        this.stopWebcam();
-
-        // Clear displays
-        if (this.gazeCtx) {
-            this.gazeCtx.clearRect(0, 0, this.gazeCanvas.width, this.gazeCanvas.height);
-        }
-
-        this.updateStats(null, null, 0);
-        this.updateStatus('Eye tracking stopped', 'info');
+    // Clear displays
+    if (this.gazeCtx) {
+      this.gazeCtx.clearRect(0, 0, this.gazeCanvas.width, this.gazeCanvas.height);
     }
+
+    if (this.rightEyeDebugCtx && this.rightEyeDebugCanvas) {
+      this.rightEyeDebugCtx.clearRect(0, 0, this.rightEyeDebugCanvas.width, this.rightEyeDebugCanvas.height);
+    }
+
+    if (this.leftEyeDebugCtx && this.leftEyeDebugCanvas) {
+      this.leftEyeDebugCtx.clearRect(0, 0, this.leftEyeDebugCanvas.width, this.leftEyeDebugCanvas.height);
+    }
+
+    this.updateOverlay({ gazeX: null, gazeY: null, fps: null });
+  }
 }
 
 // Application initialization
-let eyeTracker = null;
+let eyeTracker = new EyeTracker();
 
-async function initializeApp() {
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+startBtn.addEventListener('click', async () => {
+    if (!eyeTracker) return;
+
+    startBtn.disabled = true;
+
     try {
-        document.getElementById('statusMessage').textContent = 'Initializing...';
-
-        eyeTracker = new EyeTracker();
-        await eyeTracker.initialize();
-
-        document.getElementById('statusMessage').textContent = 'Ready to start eye tracking';
-        document.getElementById('startBtn').disabled = false;
-
-    } catch (error) {
-        document.getElementById('statusMessage').textContent = `Initialization failed: ${error.message}`;
-        document.getElementById('statusMessage').className = 'status error';
-    }
-}
-
-// Event listeners
-document.getElementById('startBtn').addEventListener('click', async () => {
-    if (eyeTracker) {
-        document.getElementById('startBtn').disabled = true;
+        if (!eyeTracker.isInitialized) {
+            await eyeTracker.initialize();
+        }
         await eyeTracker.start();
-        document.getElementById('startBtn').disabled = false;
-        document.getElementById('stopBtn').disabled = false;
-        document.getElementById('calibrateBtn').disabled = false;
+        stopBtn.disabled = false;
+    } catch (error) {
+        console.error(error);
+        startBtn.disabled = false;
     }
 });
 
-document.getElementById('stopBtn').addEventListener('click', () => {
-    if (eyeTracker) {
-        eyeTracker.stop();
-        document.getElementById('stopBtn').disabled = true;
-        document.getElementById('calibrateBtn').disabled = true;
-    }
+stopBtn.addEventListener('click', () => {
+    if (!eyeTracker) return;
+
+    stopBtn.disabled = true;
+    eyeTracker.stop();
+    startBtn.disabled = false;
 });
 
-document.getElementById('calibrateBtn').addEventListener('click', () => {
-    alert('Calibration functionality would be implemented here');
-});
+const updateFullscreenButton = () => {
+    if (!fullscreenBtn) return;
+    fullscreenBtn.textContent = document.fullscreenElement ? 'Exit Fullscreen' : 'Enter Fullscreen';
+};
 
-document.getElementById("initBtn").addEventListener("click", () => {
-    // Initialize the application
-    initializeApp();
-});
+if (fullscreenBtn) {
+    fullscreenBtn.addEventListener('click', async () => {
+        try {
+            if (!document.fullscreenElement) {
+                await document.documentElement.requestFullscreen();
+            } else {
+                await document.exitFullscreen();
+            }
+        } catch (error) {
+            console.error('Fullscreen toggle failed:', error);
+        } finally {
+            updateFullscreenButton();
+        }
+    });
+
+    document.addEventListener('fullscreenchange', updateFullscreenButton);
+    updateFullscreenButton();
+}
