@@ -17,8 +17,8 @@ describe("BatchFeature", () => {
     const batch = new BatchFeature(data);
     expect(batch.has("input_features")).toBe(true);
     expect(batch.has("attention_mask")).toBe(true);
-    expect(batch.get("input_features")).toEqual([[1, 2, 3], [4, 5, 6]]);
-    expect(batch.get("attention_mask")).toEqual([1, 1, 0]);
+    expect(batch.get<number[][]>("input_features")).toEqual([[1, 2, 3], [4, 5, 6]]);
+    expect(batch.get<number[]>("attention_mask")).toEqual([1, 1, 0]);
   });
 
   test("should get and set values", () => {
@@ -26,10 +26,10 @@ describe("BatchFeature", () => {
 
     batch.set("test_key", [1, 2, 3]);
     expect(batch.has("test_key")).toBe(true);
-    expect(batch.get("test_key")).toEqual([1, 2, 3]);
+    expect(batch.get<number[]>("test_key")).toEqual([1, 2, 3]);
 
     batch.set("test_key", [4, 5, 6]);
-    expect(batch.get("test_key")).toEqual([4, 5, 6]);
+    expect(batch.get<number[]>("test_key")).toEqual([4, 5, 6]);
   });
 
   test("should iterate over keys", () => {
@@ -137,8 +137,8 @@ describe("BatchFeature", () => {
     const batch = new BatchFeature(data, "np");
 
     // Should automatically convert to numeric arrays
-    expect(batch.get("input_features")).toEqual([[1, 2, 3]]);
-    expect(batch.get("attention_mask")).toEqual([1, 0, 1]);
+    expect(batch.get<number[][]>("input_features")).toEqual([[1, 2, 3]]);
+    expect(batch.get<number[]>("attention_mask")).toEqual([1, 0, 1]);
   });
 
   test("should handle mixed data types", () => {
@@ -152,10 +152,10 @@ describe("BatchFeature", () => {
     const batch = new BatchFeature(data);
     batch.convertToTensors("np");
 
-    expect(batch.get("numbers")).toEqual([1, 2, 3]);
-    expect(batch.get("strings")).toEqual([NaN, NaN, NaN]); // Non-numeric strings become NaN
-    expect(batch.get("nested")).toEqual([[1, 2], [3, 4]]);
-    expect(batch.get("mixed")).toEqual([1, 2, 3.5]);
+    expect(batch.get<number[]>("numbers")).toEqual([1, 2, 3]);
+    expect(batch.get<number[]>("strings")).toEqual([NaN, NaN, NaN]); // Non-numeric strings become NaN
+    expect(batch.get<number[][]>("nested")).toEqual([[1, 2], [3, 4]]);
+    expect(batch.get<number[]>("mixed")).toEqual([1, 2, 3.5]);
   });
 
   test("should handle empty arrays", () => {
@@ -168,9 +168,9 @@ describe("BatchFeature", () => {
     const batch = new BatchFeature(data);
     batch.convertToTensors("np");
 
-    expect(batch.get("empty_array")).toEqual([]);
-    expect(batch.get("nested_empty")).toEqual([[], []]);
-    expect(batch.get("mixed_empty")).toEqual([[], [1, 2, 3]]);
+    expect(batch.get<never[]>("empty_array")).toEqual([]);
+    expect(batch.get<never[][]>("nested_empty")).toEqual([[], []]);
+    expect(batch.get<number[][]>("mixed_empty")).toEqual([[], [1, 2, 3]]);
   });
 
   test("should preserve non-array values", () => {
@@ -183,10 +183,10 @@ describe("BatchFeature", () => {
 
     const batch = new BatchFeature(data);
 
-    expect(batch.get("single_number")).toBe(42);
-    expect(batch.get("single_string")).toBe("hello");
-    expect(batch.get("boolean_value")).toBe(true);
-    expect(batch.get("null_value")).toBe(null);
+    expect(batch.get<number>("single_number")).toBe(42);
+    expect(batch.get<string>("single_string")).toBe("hello");
+    expect(batch.get<boolean>("boolean_value")).toBe(true);
+    expect(batch.get<null>("null_value")).toBe(null);
   });
 
   test("should handle complex nested structures", () => {
@@ -204,7 +204,7 @@ describe("BatchFeature", () => {
     };
 
     const batch = new BatchFeature(data);
-    expect(batch.get("complex")).toEqual(data.complex);
+    expect(batch.get<Array<{values: number[], metadata: {type: string}}>>("complex")).toEqual(data.complex);
   });
 
   test("should be chainable", () => {

@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && cp ../../node_modules/onnxruntime-web/dist/* dist/assets/",
-    "preview": "vite preview"
+    "build": "vite build && cp node_modules/onnxruntime-web/dist/* dist/assets/",
+    "preview": "vite preview",
+    "start": "bun run build && bun run preview"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.8",
     "@techstark/opencv-js": "^4.11.0-release.1",
+    "express": "^5.1.0",
     "onnxruntime-web": "^1.16.3"
   }
 }

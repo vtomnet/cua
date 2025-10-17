@@ -221,8 +221,8 @@ describe("SequenceFeatureExtractor", () => {
         returnAttentionMask: true
       });
 
-      expect(result.get("input_features")).toEqual([]);
-      expect(result.get("attention_mask")).toEqual([]);
+      expect(result.get<never[]>("input_features")).toEqual([]);
+      expect(result.get<never[]>("attention_mask")).toEqual([]);
     });
   });
 

@@ -1,7 +1,14 @@
 {
   "name": "open-things",
-  "module": "index.ts",
+  "version": "0.0.1",
+  "main": "dist/index.js",
+  "module": "src/index.ts",
+  "types": "dist/index.d.ts",
   "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

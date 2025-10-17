@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/frontend-core" },
+    { "path": "packages/frontend-native" },
+    { "path": "packages/frontend-web" },
+    { "path": "packages/open-things" },
+    { "path": "packages/whisper-feature-extractor" }
+  ]
+}
