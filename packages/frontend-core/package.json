@@ -10,9 +10,13 @@
     "build:types": "tsc --project tsconfig.build.json"
   },
   "dependencies": {
-    "core": "workspace:*"
+    "core": "workspace:*",
+    "llama-tokenizer-js": "^1.2.2",
+    "onnxruntime-web": "^1.23.0",
+    "whisper-feature-extractor": "workspace:*"
   },
   "devDependencies": {
-    "svelte": "^5.39.10"
+    "svelte": "^5.39.10",
+    "typescript": "^5.9.3"
   }
 }
