@@ -7,7 +7,7 @@ import {
   Timestamp,
 } from "frontend-core";
 import "./app.css";
-import OrbVisualizer from "./components/OrbVisualizer";
+import SiriEdgeVisualizer from "./components/SiriEdgeVisualizer";
 
 type Message = {
   text: string;
@@ -698,7 +698,7 @@ const App = (): JSX.Element => {
   return (
     <main className="relative flex min-h-screen w-full flex-col overflow-hidden font-sans leading-relaxed text-gray-800">
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <OrbVisualizer analyser={visualizerAnalyser} isRecording={isRecording} />
+        <SiriEdgeVisualizer analyser={visualizerAnalyser} isRecording={isRecording} />
       </div>
 
       <div className="relative z-10 flex flex-1 items-end justify-end overflow-auto p-4 md:p-8">

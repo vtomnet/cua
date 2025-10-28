@@ -21,11 +21,7 @@ Set VITE_OPENAI_API_KEY and CEREBRAS_API_KEY.
 Run once:
 ```bash
 bun install
-(cd packages/frontend-native && bun run link-electron)
-(cd packages/server && bun run link-ort)
-(cd packages/core && bun run build)
-(cd packages/frontend-core && bun run build)
-(cd packages/frontend-native && bun run build)
+for d in whisper-feature-extractor open-things core frontend-core; do bun run --cwd=packages/$d build; done
 ```
 
 Now you may run `bun dev` from frontend-native, frontend-web, or server. You may need to rebuild core or frontend-core after updating them.
