@@ -7,7 +7,7 @@ import {
   Timestamp,
 } from "frontend-core";
 import "./app.css";
-import SiriEdgeVisualizer from "./components/SiriEdgeVisualizer";
+import Cursor from "./components/Cursor";
 
 type Message = {
   text: string;
@@ -698,55 +698,63 @@ const App = (): JSX.Element => {
   return (
     <main className="relative flex min-h-screen w-full flex-col overflow-hidden font-sans leading-relaxed text-gray-800">
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <SiriEdgeVisualizer analyser={visualizerAnalyser} isRecording={isRecording} />
+        <Cursor analyser={visualizerAnalyser} isRecording={isRecording} />
       </div>
 
       <div className="relative z-10 flex flex-1 items-end justify-end overflow-auto p-4 md:p-8">
-        <div className="flex w-full max-w-3xl flex-col gap-8">
-          <div className={`status p-4 rounded-lg border font-semibold transition-all duration-200 ease-in-out ${statusClass}`}>
-            {status}
-          </div>
-
+        <div className="flex w-full max-w-3xl flex-col">
           <div className="rounded-xl border border-white/30 bg-white/80 p-6 shadow-lg backdrop-blur">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center">
+            {/* Compact header with status and visualizer info */}
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-gray-600">
+                {!isRecording ? "Visualizer idle" : "Visualizer active"}
+              </div>
+              <div className={`text-sm px-3 py-1 rounded-md border font-medium transition-all duration-200 ${statusClass}`}>
+                {status}
+              </div>
+            </div>
+
+            {/* Control buttons */}
+            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:gap-4">
               <button
                 onClick={startRecording}
                 disabled={isRecording}
-                className="w-full rounded-md bg-blue-500 px-6 py-3 text-sm font-medium text-white shadow-sm transition-all duration-200 ease-in-out hover:bg-blue-600 hover:shadow-md disabled:cursor-not-allowed disabled:bg-gray-400 disabled:opacity-60 md:w-auto"
+                className="rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all duration-200 ease-in-out hover:bg-blue-600 hover:shadow-md disabled:cursor-not-allowed disabled:bg-gray-400 disabled:opacity-60"
               >
                 Start Recording
               </button>
               <button
                 onClick={stopRecording}
                 disabled={!isRecording}
-                className="w-full rounded-md bg-blue-500 px-6 py-3 text-sm font-medium text-white shadow-sm transition-all duration-200 ease-in-out hover:bg-blue-600 hover:shadow-md disabled:cursor-not-allowed disabled:bg-gray-400 disabled:opacity-60 md:w-auto"
+                className="rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all duration-200 ease-in-out hover:bg-blue-600 hover:shadow-md disabled:cursor-not-allowed disabled:bg-gray-400 disabled:opacity-60"
               >
                 Stop Recording
               </button>
             </div>
-          </div>
 
-          <div className="rounded-xl border border-white/30 bg-white/80 p-6 shadow-lg backdrop-blur">
-            <h3 className="mb-4 text-2xl font-medium text-gray-700">Transcriptions:</h3>
-            <div className="mt-4 max-h-96 overflow-y-auto rounded-md border border-gray-200 bg-white p-4">
-              {messages.map((message) => (
-                message.role === "user" ? (
-                  <div
-                    key={`user-${message.timestamp}-${message.text}`}
-                    className="border-b border-gray-200 py-2 leading-relaxed last:border-b-0"
-                  >
-                    <strong>[{formatTimestamp(message.timestamp)}]</strong> {message.text}
-                  </div>
-                ) : (
-                  <div
-                    key={`assistant-${message.timestamp}-${message.text}`}
-                    className="mt-1 rounded-md border-l-4 border-blue-500 bg-blue-50 p-3 text-gray-800"
-                    style={{ whiteSpace: "pre-line" }}
-                  >
-                    <strong>[{formatTimestamp(message.timestamp)}] GPT:</strong> {message.text}
-                  </div>
-                )
-              ))}
+            {/* Transcriptions section */}
+            <div>
+              <h3 className="mb-3 text-lg font-medium text-gray-700">Transcriptions</h3>
+              <div className="max-h-96 overflow-y-auto rounded-md border border-gray-200 bg-white p-4">
+                {messages.map((message) => (
+                  message.role === "user" ? (
+                    <div
+                      key={`user-${message.timestamp}-${message.text}`}
+                      className="border-b border-gray-200 py-2 leading-relaxed last:border-b-0"
+                    >
+                      <strong>[{formatTimestamp(message.timestamp)}]</strong> {message.text}
+                    </div>
+                  ) : (
+                    <div
+                      key={`assistant-${message.timestamp}-${message.text}`}
+                      className="mt-1 rounded-md border-l-4 border-blue-500 bg-blue-50 p-3 text-gray-800"
+                      style={{ whiteSpace: "pre-line" }}
+                    >
+                      <strong>[{formatTimestamp(message.timestamp)}] GPT:</strong> {message.text}
+                    </div>
+                  )
+                ))}
+              </div>
             </div>
           </div>
         </div>

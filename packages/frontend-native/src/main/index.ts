@@ -12,19 +12,18 @@ function createWindow() {
     hasShadow: false,
     alwaysOnTop: true,
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),  // Built preload
+      preload: path.join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
       contextIsolation: true
     }
   });
 
-  win.once('ready-to-show', () => {
-    win.maximize();
-    win.setResizable(false);  // Keep previous non-resizable behavior after maximizing
-  });
+  win.maximize();
+  win.setResizable(false);
+  win.show();
 
   if (process.env.VITE_DEV_SERVER_URL) {
-    win.loadURL(process.env.VITE_DEV_SERVER_URL);  // HMR in dev
+    win.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
     win.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
