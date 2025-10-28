@@ -3,20 +3,35 @@ import { useEffect, useRef } from "react";
 type CursorProps = {
   analyser: AnalyserNode | null;
   isRecording: boolean;
+  status: "ready" | "loading" | "recording" | "error";
 };
 
-const Cursor = ({ analyser, isRecording }: CursorProps): JSX.Element => {
+const Cursor = ({ analyser, isRecording, status }: CursorProps): JSX.Element => {
   const analyserRef = useRef<AnalyserNode | null>(analyser);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const dataArrayRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const isRecordingRef = useRef(isRecording);
   const smoothedVolumeRef = useRef(0);
   const animationFrameRef = useRef<number>();
   const glowRef = useRef<HTMLDivElement>(null);
 
+  const getGlowColor = () => {
+    switch (status) {
+      case "loading":
+        return "bg-yellow-400";
+      case "recording":
+        return "bg-blue-400";
+      case "error":
+        return "bg-red-600";
+      case "ready":
+      default:
+        return "bg-gray-400";
+    }
+  };
+
   useEffect(() => {
     analyserRef.current = analyser;
     if (analyser) {
-      dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
+      dataArrayRef.current = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
     } else {
       dataArrayRef.current = null;
       smoothedVolumeRef.current = 0;
@@ -47,9 +62,30 @@ const Cursor = ({ analyser, isRecording }: CursorProps): JSX.Element => {
       smoothedVolumeRef.current = smoothed;
 
       const elapsed = Date.now() * 0.001;
-      const breathPulse = Math.sin(elapsed * 0.8) * 0.3;
-      const speechPulse = smoothed * 2.0;
-      const totalIntensity = 0.3 + breathPulse + speechPulse;
+      let totalIntensity = 0.3;
+
+      // Different animation patterns based on status
+      switch (status) {
+        case "loading":
+          // Faster pulsing for loading
+          totalIntensity = 0.4 + Math.sin(elapsed * 2) * 0.4;
+          break;
+        case "error":
+          // Intense, urgent pulsing for errors
+          totalIntensity = 0.6 + Math.sin(elapsed * 3) * 0.3;
+          break;
+        case "recording":
+          // Normal speech-reactive animation when recording
+          const speechPulse = smoothed * 2.0;
+          totalIntensity = 0.5 + speechPulse;
+          break;
+        case "ready":
+        default:
+          // Gentle breathing pattern when ready
+          const breathPulse = Math.sin(elapsed * 0.8) * 0.3;
+          totalIntensity = 0.3 + breathPulse;
+          break;
+      }
 
       if (glowRef.current) {
         const blurAmount = 8 + totalIntensity * 12;
@@ -68,14 +104,14 @@ const Cursor = ({ analyser, isRecording }: CursorProps): JSX.Element => {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, []);
+  }, [status]);
 
   return (
     <div className="relative h-full w-full bg-transparent flex items-center justify-center">
-      {/* Blue glow background */}
+      {/* Status glow background */}
       <div
         ref={glowRef}
-        className="absolute w-16 h-16 bg-blue-400 rounded-full"
+        className={`absolute w-16 h-16 ${getGlowColor()} rounded-full`}
         style={{
           filter: 'blur(12px)',
           opacity: 0.4,
@@ -105,10 +141,6 @@ const Cursor = ({ analyser, isRecording }: CursorProps): JSX.Element => {
             />
           </g>
         </svg>
-      </div>
-
-      <div className="pointer-events-none absolute inset-x-0 bottom-4 text-center text-xs uppercase tracking-[0.35em] text-blue-100/80">
-        {isRecording ? "Listening" : "Assistant Ready"}
       </div>
     </div>
   );
