@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { fas } from "@fortawesome/free-solid-svg-icons";
 import { far } from "@fortawesome/free-regular-svg-icons";
@@ -64,6 +63,10 @@ const App = (): JSX.Element => {
     } else {
       setCurrentError(null);
     }
+
+    // Send recording state to main process for tray icon update
+    const isCurrentlyRecording = newStatus === "recording";
+    window.electronAPI?.sendRecordingState?.(isCurrentlyRecording);
   };
 
   const displayTranscription = (transcription: string, timestamp: number) => {
@@ -648,6 +651,9 @@ const App = (): JSX.Element => {
   };
 
   useEffect(() => {
+    // Listen for tray toggle recording events
+    const removeToggleListener = window.electronAPI?.onToggleRecording?.(toggleRecording);
+
     return () => {
       if (silenceTimeoutRef.current !== null) {
         clearTimeout(silenceTimeoutRef.current);
@@ -666,6 +672,11 @@ const App = (): JSX.Element => {
         mediaStreamRef.current.getTracks().forEach((track) => track.stop());
         mediaStreamRef.current = null;
       }
+
+      // Clean up tray toggle listener
+      if (removeToggleListener) {
+        removeToggleListener();
+      }
     };
   }, []);
 
@@ -676,32 +687,6 @@ const App = (): JSX.Element => {
         <Cursor analyser={visualizerAnalyser} status={status} currentResponse={currentResponse} />
       </div>
 
-      {/* Recording toggle button - positioned at lower right */}
-      <div className="absolute bottom-4 right-4 z-10 md:bottom-8 md:right-8">
-        <button
-          onClick={toggleRecording}
-          disabled={status === "loading"}
-          className={`w-16 h-16 rounded-full flex items-center justify-center text-white shadow-lg transition-all duration-200 ease-in-out hover:shadow-xl disabled:opacity-60 disabled:cursor-not-allowed ${
-            isRecording
-              ? 'bg-red-500 hover:bg-red-600'
-              : 'bg-blue-500 hover:bg-blue-600'
-          }`}
-          aria-label={isRecording ? 'Stop Recording' : 'Start Recording'}
-        >
-            <svg
-              className="w-6 h-6"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              {isRecording ? (
-                <FontAwesomeIcon icon="fa-solid fa-microphone-slash"/>
-              ) : (
-                <FontAwesomeIcon icon="fa-solid fa-microphone"/>
-              )}
-            </svg>
-        </button>
-      </div>
 
       {/* Error Display - positioned at upper center */}
       {currentError && (
