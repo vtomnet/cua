@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { library } from "@fortawesome/fontawesome-svg-core";
-import { fas } from "@fortawesome/free-solid-svg-icons";
-import { far } from "@fortawesome/free-regular-svg-icons";
-import { fab } from "@fortawesome/free-brands-svg-icons";
+// import { library } from "@fortawesome/fontawesome-svg-core";
+// import { fas } from "@fortawesome/free-solid-svg-icons";
+// import { far } from "@fortawesome/free-regular-svg-icons";
+// import { fab } from "@fortawesome/free-brands-svg-icons";
 import {
   VadIterator,
   SmartTurnV3,
@@ -12,7 +12,7 @@ import {
 import "./app.css";
 import Cursor from "./components/Cursor";
 
-library.add(fas, far, fab);
+// library.add(fas, far, fab);
 
 type TranscriptionJob = {
   data: Float32Array;

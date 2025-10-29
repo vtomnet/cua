@@ -68,7 +68,6 @@ function createTray() {
 }
 
 function createWindow() {
-
   const win = new BrowserWindow({
     width: 800,
     height: 600,
@@ -77,6 +76,9 @@ function createWindow() {
     resizable: true,
     hasShadow: false,
     alwaysOnTop: true,
+    focusable: false,
+    show: false,
+    skipTaskbar: true,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -84,16 +86,18 @@ function createWindow() {
     }
   });
 
-  win.maximize();
-  win.setResizable(false);
-  win.setIgnoreMouseEvents(true);
-  win.show();
-
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
     win.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
+
+  win.once('ready-to-show', () => {
+    win.maximize();
+    win.setResizable(false);
+    win.setIgnoreMouseEvents(true);
+    win.showInactive();
+  });
 }
 
 ipcMain.handle("open-tool", async (_event: any, data: any) => {
