@@ -1,4 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { library } from "@fortawesome/fontawesome-svg-core";
+import { fas } from "@fortawesome/free-solid-svg-icons";
+import { far } from "@fortawesome/free-regular-svg-icons";
+import { fab } from "@fortawesome/free-brands-svg-icons";
 import {
   VadIterator,
   SmartTurnV3,
@@ -7,6 +12,8 @@ import {
 } from "frontend-core";
 import "./app.css";
 import Cursor from "./components/Cursor";
+
+library.add(fas, far, fab);
 
 type TranscriptionJob = {
   data: Float32Array;
@@ -688,11 +695,9 @@ const App = (): JSX.Element => {
               xmlns="http://www.w3.org/2000/svg"
             >
               {isRecording ? (
-                // Stop icon (square)
-                <rect x="6" y="6" width="8" height="8" />
+                <FontAwesomeIcon icon="fa-solid fa-microphone-slash"/>
               ) : (
-                // Microphone icon
-                <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+                <FontAwesomeIcon icon="fa-solid fa-microphone"/>
               )}
             </svg>
         </button>
