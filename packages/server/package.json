@@ -1,23 +1,29 @@
 {
   "name": "server",
   "version": "0.0.1",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "bun --hot src/index.ts",
-
-    "link-ort": "ln -sf ../../../node_modules/onnxruntime-web/dist public/onnx"
-  },
   "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.38",
     "@cerebras/cerebras_cloud_sdk": "^1.50.0",
+    "ai": "^5.0.81",
     "core": "workspace:*",
+    "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "node-datachannel": "^0.29.0",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/node": "^24.6.1",
     "@types/ws": "^8.18.1"
+  },
+  "private": true,
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "link-ort": "ln -sf ../../../node_modules/onnxruntime-web/dist public/onnx"
+  },
+  "type": "module",
+  "peerDependencies": {
+    "onnxruntime-web": "^1.23.0"
   }
 }

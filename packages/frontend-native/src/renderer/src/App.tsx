@@ -21,6 +21,12 @@ type TranscriptionJob = {
 
 const MIN_TRANSCRIBE_SAMPLES = Math.ceil(16000 * 0.1);
 const SILENCE_THRESHOLD = 10;
+const MAX_AUDIO_BUFFER_CHUNKS = 500; // Limit buffer growth (~25 seconds at 512 samples/chunk)
+const MAX_TURN_DETECTION_BUFFER_SAMPLES = 8 * 16000; // 8 seconds max for turn detection
+
+// Configurable server URLs with fallbacks
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+const MODELS_BASE_URL = import.meta.env.VITE_MODELS_BASE_URL || `${API_BASE_URL}/models`;
 
 type AppStatus = "idle" | "loading" | "recording" | "error";
 
@@ -148,12 +154,36 @@ const App = (): JSX.Element => {
     lastRequestTimestampRef.current = Date.now();
 
     try {
-      const response = await fetch("http://localhost:3000/generate", {
+      // Take screenshot before sending to API
+      let screenshotBase64: string | undefined;
+      try {
+        const screenshotResult = await window.electronAPI.takeScreenshot();
+        if (screenshotResult.success && screenshotResult.image) {
+          screenshotBase64 = screenshotResult.image;
+          console.log(`Screenshot captured: ${screenshotResult.width}x${screenshotResult.height} (resized from ${screenshotResult.originalWidth}x${screenshotResult.originalHeight})`);
+        } else {
+          console.warn('Screenshot failed:', screenshotResult.error);
+        }
+      } catch (screenshotError) {
+        console.error('Error taking screenshot:', screenshotError);
+        // Continue without screenshot if it fails
+      }
+
+      // Build request body with text and optional image
+      const requestBody: { text: string; image?: string } = {
+        text: transcription,
+      };
+
+      if (screenshotBase64) {
+        requestBody.image = screenshotBase64;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/generate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ input: transcription }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -161,63 +191,57 @@ const App = (): JSX.Element => {
       }
 
       const data = await response.json();
-      const choice = data?.choices?.[0];
-      const message = choice?.message ?? null;
       const responseLines: string[] = [];
 
-      const reasoning =
-        typeof message?.reasoning === "string" ? message.reasoning.trim() : "";
-      if (reasoning) {
-        responseLines.push(`Reasoning: ${reasoning}`);
+      // Handle the new server response format
+      const text = data?.text;
+      if (typeof text === "string" && text.trim()) {
+        responseLines.push(text.trim());
       }
 
-      const content = message?.content;
-      if (Array.isArray(content)) {
-        const contentText = content
-          .map((entry: unknown) => {
-            if (typeof entry === "string") return entry;
-            if (entry && typeof entry === "object") {
-              const maybeText = (entry as { text?: string }).text;
-              if (typeof maybeText === "string") return maybeText;
-            }
-            return "";
-          })
-          .join(" ")
-          .trim();
-        if (contentText) {
-          responseLines.push(contentText);
-        }
-      } else if (typeof content === "string" && content.trim()) {
-        responseLines.push(content.trim());
-      }
-
-      const toolCalls = Array.isArray(message?.tool_calls)
-        ? message.tool_calls
-        : [];
+      // Handle tool calls from the new API format
+      const toolCalls = Array.isArray(data?.toolCalls) ? data.toolCalls : [];
       for (const call of toolCalls) {
-        const toolName = call?.function?.name ?? call?.name ?? "unknown_tool";
-        let args = call?.function?.arguments ?? call?.arguments ?? "";
-        if (typeof args === "string" && args.trim()) {
-          try {
-            args = JSON.parse(args);
-          } catch (error) {
-            console.error("Failed to parse tool arguments", error);
-          }
-        }
-        const argsStr = typeof args === "string" ? args : JSON.stringify(args);
+        console.log(call);
+        const toolName = call?.toolName ?? "unknown_tool";
+        const args = call?.input ?? {};
+        const argsStr = JSON.stringify(args);
         responseLines.push(`Called ${toolName}(${argsStr})`);
-        if (toolName === "open") {
-          const result = await window.electronAPI.openTool(args);
-          console.log("Result from openTool:", result);
+
+        // Execute tool calls with proper error handling
+        try {
+          let result;
+          if (toolName === "open") {
+            result = await window.electronAPI.openTool(args);
+          } else if (toolName === "scroll") {
+            result = await window.electronAPI.scrollTool(args);
+          } else if (toolName === "click") {
+            result = await window.electronAPI.clickTool(args);
+          } else if (toolName === "keys") {
+            result = await window.electronAPI.keysTool(args);
+          } else {
+            console.warn(`Unknown tool: ${toolName}`);
+            continue;
+          }
+
+          console.log(`Result from ${toolName}:`, result);
+
+          // Add result info to response if tool execution failed
+          if (result && !result.success) {
+            responseLines.push(`${toolName} failed: ${result.output || 'Unknown error'}`);
+          }
+        } catch (toolError) {
+          console.error(`Error executing tool ${toolName}:`, toolError);
+          responseLines.push(`${toolName} error: ${toolError instanceof Error ? toolError.message : 'Unknown error'}`);
         }
       }
 
+      // Fallback if no content
       if (!responseLines.length) {
-        const fallback = choice?.text ?? data?.choices?.[0]?.text;
-        if (typeof fallback === "string" && fallback.trim()) {
-          responseLines.push(fallback.trim());
-        } else {
+        if (data) {
           responseLines.push(JSON.stringify(data));
+        } else {
+          responseLines.push("No response received");
         }
       }
 
@@ -249,6 +273,12 @@ const App = (): JSX.Element => {
 
     if (isTranscribingRef.current) {
       transcriptionQueueRef.current.push({ data: audioData, reason });
+      // Prevent memory leak by limiting transcription queue
+      const MAX_TRANSCRIPTION_QUEUE = 20;
+      if (transcriptionQueueRef.current.length > MAX_TRANSCRIPTION_QUEUE) {
+        console.warn("Transcription queue overflow, dropping oldest request");
+        transcriptionQueueRef.current.shift();
+      }
       return;
     }
 
@@ -270,13 +300,12 @@ const App = (): JSX.Element => {
 
           turnDetectionBufferRef.current.push(data);
 
-          const maxSamples = 8 * 16000;
           let totalSamples = turnDetectionBufferRef.current.reduce(
             (sum, chunk) => sum + chunk.length,
             0,
           );
           while (
-            totalSamples > maxSamples &&
+            totalSamples > MAX_TURN_DETECTION_BUFFER_SAMPLES &&
             turnDetectionBufferRef.current.length > 1
           ) {
             const removed = turnDetectionBufferRef.current.shift();
@@ -360,6 +389,11 @@ const App = (): JSX.Element => {
       } else if (speechStartedRef.current) {
         currentSpeechBufferRef.current.push(audioChunk);
 
+        // Prevent memory leak by limiting current speech buffer
+        if (currentSpeechBufferRef.current.length > MAX_AUDIO_BUFFER_CHUNKS) {
+          currentSpeechBufferRef.current.shift(); // Remove oldest chunk
+        }
+
         if (!hasCurrentSpeech) {
           silenceCounterRef.current += 1;
           if (silenceCounterRef.current >= SILENCE_THRESHOLD) {
@@ -425,7 +459,7 @@ const App = (): JSX.Element => {
   const initializeModelsLocal = async () => {
     try {
       updateStatus("loading");
-      const vad = new VadIterator("http://localhost:3000/models/silero_vad.onnx");
+      const vad = new VadIterator(`${MODELS_BASE_URL}/silero_vad.onnx`);
       await vad.init();
       vadRef.current = vad;
 
@@ -544,7 +578,13 @@ const App = (): JSX.Element => {
       ) => {
         const { audioData } = event.data;
         const audioChunk = new Float32Array(audioData);
+
+        // Prevent memory leak by limiting recorded chunks
         recordedChunksRef.current.push(audioChunk);
+        if (recordedChunksRef.current.length > MAX_AUDIO_BUFFER_CHUNKS) {
+          recordedChunksRef.current.shift(); // Remove oldest chunk
+        }
+
         await processAudioChunkLocal(audioChunk);
       };
 
@@ -581,26 +621,38 @@ const App = (): JSX.Element => {
   };
 
   const toggleRecording = async () => {
-    const currentIsRecording = isRecordingRef.current;
+    // Use a more robust state check that considers both ref and status
+    const currentIsRecording = isRecordingRef.current || status === "recording";
     console.log(`toggleRecording called - status: ${status}, isRecording (state): ${isRecording}, isRecording (ref): ${currentIsRecording}, toggleInProgress: ${toggleInProgressRef.current}`);
 
-    // Prevent multiple simultaneous toggles
+    // Prevent multiple simultaneous toggles with atomic operation
     if (toggleInProgressRef.current) {
       console.log('Toggle already in progress, ignoring...');
       return;
     }
 
+    // Set toggle in progress atomically
     toggleInProgressRef.current = true;
 
     try {
-      if (currentIsRecording) {
+      // Double-check state hasn't changed since we started
+      const finalIsRecording = isRecordingRef.current || status === "recording";
+
+      if (finalIsRecording) {
         console.log('Stopping recording...');
         await stopRecording();
       } else {
         console.log('Starting recording...');
         await startRecording();
       }
+    } catch (error) {
+      console.error('Error during recording toggle:', error);
+      // Ensure we're in a consistent state after error
+      if (isRecordingRef.current && (status === "error" || status === "idle")) {
+        updateStatus("idle");
+      }
     } finally {
+      // Always clear the toggle flag
       toggleInProgressRef.current = false;
     }
   };
@@ -672,9 +724,11 @@ const App = (): JSX.Element => {
     }
   };
 
+
   useEffect(() => {
     // Listen for tray toggle recording events
     const removeToggleListener = window.electronAPI?.onToggleRecording?.(toggleRecording);
+
 
     return () => {
       if (silenceTimeoutRef.current !== null) {
