@@ -53,10 +53,15 @@ const App = (): JSX.Element => {
   const speechStartedRef = useRef(false);
   const silenceCounterRef = useRef(0);
   const silenceTimeoutRef = useRef<number | null>(null);
+  const toggleInProgressRef = useRef(false);
+  const isRecordingRef = useRef(false);
 
   const isRecording = status === "recording";
 
   const updateStatus = (newStatus: AppStatus, errorMsg?: string) => {
+    const prevStatus = status;
+    console.log(`updateStatus: ${prevStatus} → ${newStatus}, error: ${errorMsg}`);
+
     setStatus(newStatus);
     if (newStatus === "error" && errorMsg) {
       setCurrentError(errorMsg);
@@ -64,9 +69,12 @@ const App = (): JSX.Element => {
       setCurrentError(null);
     }
 
-    // Send recording state to main process for tray icon update
-    const isCurrentlyRecording = newStatus === "recording";
-    window.electronAPI?.sendRecordingState?.(isCurrentlyRecording);
+    // Update recording ref to always be in sync
+    const newIsRecording = newStatus === "recording";
+    isRecordingRef.current = newIsRecording;
+
+    console.log(`Sending recording state: ${newIsRecording} (status: ${prevStatus} → ${newStatus})`);
+    window.electronAPI?.sendRecordingState?.(newIsRecording);
   };
 
   const displayTranscription = (transcription: string, timestamp: number) => {
@@ -573,15 +581,33 @@ const App = (): JSX.Element => {
   };
 
   const toggleRecording = async () => {
-    if (isRecording) {
-      await stopRecording();
-    } else {
-      await startRecording();
+    const currentIsRecording = isRecordingRef.current;
+    console.log(`toggleRecording called - status: ${status}, isRecording (state): ${isRecording}, isRecording (ref): ${currentIsRecording}, toggleInProgress: ${toggleInProgressRef.current}`);
+
+    // Prevent multiple simultaneous toggles
+    if (toggleInProgressRef.current) {
+      console.log('Toggle already in progress, ignoring...');
+      return;
+    }
+
+    toggleInProgressRef.current = true;
+
+    try {
+      if (currentIsRecording) {
+        console.log('Stopping recording...');
+        await stopRecording();
+      } else {
+        console.log('Starting recording...');
+        await startRecording();
+      }
+    } finally {
+      toggleInProgressRef.current = false;
     }
   };
 
   const stopRecording = async () => {
-    if (!isRecording || !audioContextRef.current) {
+    if (!isRecordingRef.current) {
+      console.log('stopRecording called but not currently recording, ignoring');
       return;
     }
 
@@ -607,21 +633,22 @@ const App = (): JSX.Element => {
       mediaStreamRef.current = null;
     }
 
-    await audioContext.close();
+    if (audioContext) {
+      await audioContext.close();
+    }
 
     if (ringBufferRef.current) {
       ringBufferRef.current.clear();
       ringBufferRef.current = null;
     }
 
+    // If no audio was recorded, just stay in idle state (not an error)
     if (recordedChunksRef.current.length === 0) {
-      updateStatus("error", "No audio recorded");
       return;
     }
 
+    // Process recorded audio silently in the background without changing UI state
     try {
-      updateStatus("loading");
-
       const totalLength = recordedChunksRef.current.reduce(
         (sum, chunk) => sum + chunk.length,
         0,
@@ -635,18 +662,13 @@ const App = (): JSX.Element => {
       }
 
       const vad = vadRef.current;
-      if (!vad) {
-        updateStatus("error", "VAD unavailable");
-        return;
+      if (vad) {
+        await vad.process(combinedAudio);
+        vad.getSpeechTimestamps();
       }
-
-      await vad.process(combinedAudio);
-      vad.getSpeechTimestamps();
-
-      updateStatus("idle");
     } catch (error) {
       console.error("Error processing recorded audio:", error);
-      updateStatus("error", "Error processing recorded audio");
+      // Don't change UI state for post-processing errors
     }
   };
 

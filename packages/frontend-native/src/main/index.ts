@@ -8,7 +8,7 @@ let isRecording = false;
 function updateTrayIcon() {
   if (!tray) return;
 
-  const iconName = isRecording ? 'microphone-slash-tray.png' : 'microphone-tray.png';
+  const iconName = isRecording ? 'microphone-tray.png' : 'microphone-slash-tray.png';
   const iconPath = process.env.VITE_DEV_SERVER_URL
     ? path.join(process.cwd(), iconName)
     : path.join(__dirname, iconName);
