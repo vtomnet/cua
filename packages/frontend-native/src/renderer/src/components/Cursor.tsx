@@ -2,14 +2,14 @@ import { useEffect, useRef } from "react";
 
 type CursorProps = {
   analyser: AnalyserNode | null;
-  isRecording: boolean;
-  status: "ready" | "loading" | "recording" | "error";
+  status: "idle" | "loading" | "recording" | "error";
+  currentResponse: string | null;
 };
 
-const Cursor = ({ analyser, isRecording, status }: CursorProps): JSX.Element => {
+const Cursor = ({ analyser, status, currentResponse }: CursorProps): JSX.Element => {
   const analyserRef = useRef<AnalyserNode | null>(analyser);
   const dataArrayRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
-  const isRecordingRef = useRef(isRecording);
+  const isRecordingRef = useRef(status === "recording");
   const smoothedVolumeRef = useRef(0);
   const animationFrameRef = useRef<number>();
   const glowRef = useRef<HTMLDivElement>(null);
@@ -22,7 +22,7 @@ const Cursor = ({ analyser, isRecording, status }: CursorProps): JSX.Element => 
         return "bg-blue-400";
       case "error":
         return "bg-red-600";
-      case "ready":
+      case "idle":
       default:
         return "bg-gray-400";
     }
@@ -39,8 +39,8 @@ const Cursor = ({ analyser, isRecording, status }: CursorProps): JSX.Element => 
   }, [analyser]);
 
   useEffect(() => {
-    isRecordingRef.current = isRecording;
-  }, [isRecording]);
+    isRecordingRef.current = status === "recording";
+  }, [status]);
 
   useEffect(() => {
     const animate = () => {
@@ -79,9 +79,9 @@ const Cursor = ({ analyser, isRecording, status }: CursorProps): JSX.Element => 
           const speechPulse = smoothed * 2.0;
           totalIntensity = 0.5 + speechPulse;
           break;
-        case "ready":
+        case "idle":
         default:
-          // Gentle breathing pattern when ready
+          // Gentle breathing pattern when idle
           const breathPulse = Math.sin(elapsed * 0.8) * 0.3;
           totalIntensity = 0.3 + breathPulse;
           break;
@@ -141,6 +141,15 @@ const Cursor = ({ analyser, isRecording, status }: CursorProps): JSX.Element => 
             />
           </g>
         </svg>
+
+        {/* Floating response message - positioned at southeast corner of cursor */}
+        {currentResponse && (
+          <div className="absolute top-8 -right-2 max-w-sm max-h-32 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg border border-gray-200 p-3 text-sm text-gray-800 pointer-events-none animate-in fade-in duration-300 overflow-y-auto">
+            <div className="whitespace-pre-line break-words">
+              {currentResponse}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

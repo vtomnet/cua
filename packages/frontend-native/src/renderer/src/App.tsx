@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   VadIterator,
   SmartTurnV3,
@@ -8,12 +8,6 @@ import {
 import "./app.css";
 import Cursor from "./components/Cursor";
 
-type Message = {
-  text: string;
-  timestamp: number;
-  role: "user" | "assistant";
-};
-
 type TranscriptionJob = {
   data: Float32Array;
   reason: "speech_end" | "timer";
@@ -22,13 +16,12 @@ type TranscriptionJob = {
 const MIN_TRANSCRIBE_SAMPLES = Math.ceil(16000 * 0.1);
 const SILENCE_THRESHOLD = 10;
 
+type AppStatus = "idle" | "loading" | "recording" | "error";
+
 const App = (): JSX.Element => {
-  const [isRecording, setIsRecording] = useState(false);
-  const [status, setStatus] = useState<"ready" | "loading" | "recording" | "error">("ready");
+  const [status, setStatus] = useState<AppStatus>("idle");
   const [currentError, setCurrentError] = useState<string | null>(null);
-  const [openaiResponses, setOpenaiResponses] = useState<
-    Array<{ text: string; timestamp: number }>
-  >([]);
+  const [currentResponse, setCurrentResponse] = useState<string | null>(null);
   const [visualizerAnalyser, setVisualizerAnalyser] = useState<
     AnalyserNode | null
   >(null);
@@ -55,28 +48,14 @@ const App = (): JSX.Element => {
   const silenceCounterRef = useRef(0);
   const silenceTimeoutRef = useRef<number | null>(null);
 
-  const updateStatus = (msg: string, className = "") => {
-    switch (className) {
-      case "loading":
-        setStatus("loading");
-        setCurrentError(null);
-        break;
-      case "recording":
-        setStatus("recording");
-        setCurrentError(null);
-        break;
-      case "success":
-        setStatus("ready");
-        setCurrentError(null);
-        break;
-      case "error":
-        setStatus("error");
-        setCurrentError(msg);
-        break;
-      default:
-        setStatus("ready");
-        setCurrentError(null);
-        break;
+  const isRecording = status === "recording";
+
+  const updateStatus = (newStatus: AppStatus, errorMsg?: string) => {
+    setStatus(newStatus);
+    if (newStatus === "error" && errorMsg) {
+      setCurrentError(errorMsg);
+    } else {
+      setCurrentError(null);
     }
   };
 
@@ -86,7 +65,8 @@ const App = (): JSX.Element => {
   };
 
   const displayOpenAIResponse = (responseText: string, timestamp: number) => {
-    setOpenaiResponses((prev) => [...prev, { text: responseText, timestamp }]);
+    console.log(`[${formatTimestamp(timestamp)}] Assistant: ${responseText}`);
+    setCurrentResponse(responseText);
   };
 
   const formatTimestamp = (timestamp: number): string => {
@@ -230,10 +210,9 @@ const App = (): JSX.Element => {
     } catch (error) {
       console.error("Error getting generator response:", error);
       if (lastUserSpeechTimeRef.current <= lastRequestTimestampRef.current) {
-        setOpenaiResponses((prev) => [
-          ...prev,
-          { text: "Error getting response from generator", timestamp: Date.now() },
-        ]);
+        const errorMsg = "Error getting response from generator";
+        console.log(`[${formatTimestamp(Date.now())}] Assistant: ${errorMsg}`);
+        setCurrentResponse(errorMsg);
       }
     } finally {
       isProcessingOpenAIRef.current = false;
@@ -427,17 +406,17 @@ const App = (): JSX.Element => {
 
   const initializeModelsLocal = async () => {
     try {
-      updateStatus("Initializing VAD model...", "loading");
+      updateStatus("loading");
       const vad = new VadIterator("http://localhost:3000/models/silero_vad.onnx");
       await vad.init();
       vadRef.current = vad;
 
-      updateStatus("VAD loaded, initializing Smart Turn v3...", "loading");
+      updateStatus("loading");
       const smartTurn = new SmartTurnV3();
       await smartTurn.init();
       smartTurnRef.current = smartTurn;
 
-      updateStatus("Smart Turn v3 loaded, loading ASR...", "loading");
+      updateStatus("loading");
 
       const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
       if (!apiKey) {
@@ -448,14 +427,11 @@ const App = (): JSX.Element => {
       await openaiTranscription.init();
       openaiTranscriptionRef.current = openaiTranscription;
 
-      updateStatus(
-        "OpenAI Transcription loaded, ready to generate responses locally",
-        "success",
-      );
+      updateStatus("idle");
       return true;
     } catch (error) {
       console.error("Failed to initialize models:", error);
-      updateStatus("Failed to load models or connect to OpenAI", "error");
+      updateStatus("error", "Failed to load models or connect to OpenAI");
       return false;
     }
   };
@@ -503,7 +479,7 @@ const App = (): JSX.Element => {
 
   const startRecording = async () => {
     try {
-      updateStatus("Requesting microphone access...", "loading");
+      updateStatus("loading");
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -564,7 +540,6 @@ const App = (): JSX.Element => {
       source.connect(processorNode);
       processorNode.connect(audioContext.destination);
 
-      setIsRecording(true);
       recordedChunksRef.current = [];
       currentSpeechBufferRef.current = [];
       lastTranscriptionTimeRef.current = Date.now();
@@ -579,12 +554,19 @@ const App = (): JSX.Element => {
 
       ringBufferRef.current = new RingBuffer(16000);
 
-      updateStatus("Recording... Speak into your microphone", "recording");
+      updateStatus("recording");
     } catch (error) {
       console.error("Error starting recording:", error);
       clearVisualizerAnalyser();
-      setIsRecording(false);
-      updateStatus("Failed to access microphone", "error");
+      updateStatus("error", "Failed to access microphone");
+    }
+  };
+
+  const toggleRecording = async () => {
+    if (isRecording) {
+      await stopRecording();
+    } else {
+      await startRecording();
     }
   };
 
@@ -593,7 +575,7 @@ const App = (): JSX.Element => {
       return;
     }
 
-    setIsRecording(false);
+    updateStatus("idle");
     clearVisualizerAnalyser();
 
     if (silenceTimeoutRef.current !== null) {
@@ -623,12 +605,12 @@ const App = (): JSX.Element => {
     }
 
     if (recordedChunksRef.current.length === 0) {
-      updateStatus("No audio recorded", "error");
+      updateStatus("error", "No audio recorded");
       return;
     }
 
     try {
-      updateStatus("Processing recorded audio...", "loading");
+      updateStatus("loading");
 
       const totalLength = recordedChunksRef.current.reduce(
         (sum, chunk) => sum + chunk.length,
@@ -644,20 +626,17 @@ const App = (): JSX.Element => {
 
       const vad = vadRef.current;
       if (!vad) {
-        updateStatus("VAD unavailable", "error");
+        updateStatus("error", "VAD unavailable");
         return;
       }
 
       await vad.process(combinedAudio);
-      const timestamps = vad.getSpeechTimestamps();
+      vad.getSpeechTimestamps();
 
-      updateStatus(
-        `Processing complete - ${timestamps.length} speech segments found`,
-        "success",
-      );
+      updateStatus("idle");
     } catch (error) {
       console.error("Error processing recorded audio:", error);
-      updateStatus("Error processing recorded audio", "error");
+      updateStatus("error", "Error processing recorded audio");
     }
   };
 
@@ -683,77 +662,54 @@ const App = (): JSX.Element => {
     };
   }, []);
 
-  const messages = useMemo<Message[]>(() => {
-    return [
-      // User transcriptions are now logged to console instead of displayed
-      // ...transcriptions.map((entry) => ({ ...entry, role: "user" as const })),
-      ...openaiResponses.map((entry) => ({ ...entry, role: "assistant" as const })),
-    ].sort((a, b) => a.timestamp - b.timestamp);
-  }, [openaiResponses]);
 
   return (
     <main className="relative flex min-h-screen w-full flex-col overflow-hidden font-sans leading-relaxed text-gray-800">
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <Cursor analyser={visualizerAnalyser} isRecording={isRecording} status={status} />
+        <Cursor analyser={visualizerAnalyser} status={status} currentResponse={currentResponse} />
       </div>
 
-      <div className="relative z-10 flex flex-1 items-end justify-end overflow-auto p-4 md:p-8">
-        <div className="flex w-full max-w-3xl flex-col">
-          <div className="rounded-xl border border-white/30 bg-white/80 p-6 shadow-lg backdrop-blur">
+      {/* Recording toggle button - positioned at lower right */}
+      <div className="absolute bottom-4 right-4 z-10 md:bottom-8 md:right-8">
+        <button
+          onClick={toggleRecording}
+          disabled={status === "loading"}
+          className={`w-16 h-16 rounded-full flex items-center justify-center text-white shadow-lg transition-all duration-200 ease-in-out hover:shadow-xl disabled:opacity-60 disabled:cursor-not-allowed ${
+            isRecording
+              ? 'bg-red-500 hover:bg-red-600'
+              : 'bg-blue-500 hover:bg-blue-600'
+          }`}
+          aria-label={isRecording ? 'Stop Recording' : 'Start Recording'}
+        >
+            <svg
+              className="w-6 h-6"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              {isRecording ? (
+                // Stop icon (square)
+                <rect x="6" y="6" width="8" height="8" />
+              ) : (
+                // Microphone icon
+                <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+              )}
+            </svg>
+        </button>
+      </div>
 
-            {/* Control buttons */}
-            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:gap-4">
-              <button
-                onClick={startRecording}
-                disabled={isRecording}
-                className="rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all duration-200 ease-in-out hover:bg-blue-600 hover:shadow-md disabled:cursor-not-allowed disabled:bg-gray-400 disabled:opacity-60"
-              >
-                Start Recording
-              </button>
-              <button
-                onClick={stopRecording}
-                disabled={!isRecording}
-                className="rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all duration-200 ease-in-out hover:bg-blue-600 hover:shadow-md disabled:cursor-not-allowed disabled:bg-gray-400 disabled:opacity-60"
-              >
-                Stop Recording
-              </button>
-            </div>
-
-            {/* Error Display */}
-            {currentError && (
-              <div className="mb-6 p-4 rounded-md border border-red-300 bg-red-50">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div className="ml-3">
-                    <h3 className="text-sm font-medium text-red-800">Error</h3>
-                    <div className="mt-1 text-sm text-red-700">{currentError}</div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Assistant Responses section */}
-            <div>
-              <h3 className="mb-3 text-lg font-medium text-gray-700">Assistant Responses</h3>
-              <div className="max-h-96 overflow-y-auto rounded-md border border-gray-200 bg-white p-4">
-                {messages.map((message) => (
-                  <div
-                    key={`assistant-${message.timestamp}-${message.text}`}
-                    className="mt-1 rounded-md border-l-4 border-blue-500 bg-blue-50 p-3 text-gray-800"
-                    style={{ whiteSpace: "pre-line" }}
-                  >
-                    <strong>[{formatTimestamp(message.timestamp)}] GPT:</strong> {message.text}
-                  </div>
-                ))}
-              </div>
-            </div>
+      {/* Error Display - positioned at upper center */}
+      {currentError && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 md:top-8 max-w-md p-4 rounded-md border border-red-300 bg-red-50 flex items-center">
+          <svg className="h-5 w-5 text-red-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+          </svg>
+          <div className="ml-3">
+            <h3 className="text-sm font-medium text-red-800">Error</h3>
+            <div className="mt-1 text-sm text-red-700">{currentError}</div>
           </div>
         </div>
-      </div>
+      )}
     </main>
   );
 };
