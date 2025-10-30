@@ -1,0 +1,858 @@
+import { useEffect, useRef, useState } from "react";
+// import { library } from "@fortawesome/fontawesome-svg-core";
+// import { fas } from "@fortawesome/free-solid-svg-icons";
+// import { far } from "@fortawesome/free-regular-svg-icons";
+// import { fab } from "@fortawesome/free-brands-svg-icons";
+import {
+  VadIterator,
+  SmartTurnV3,
+  OpenAIRealtimeTranscription,
+  RingBuffer,
+} from "frontend-core";
+import "./app.css";
+import Cursor from "./components/Cursor";
+import ErrorMessage from "./components/ErrorMessage";
+
+// library.add(fas, far, fab);
+
+type TranscriptionJob = {
+  data: Float32Array;
+  reason: "speech_end" | "timer";
+};
+
+const MIN_TRANSCRIBE_SAMPLES = Math.ceil(16000 * 0.1);
+const SILENCE_THRESHOLD = 10;
+const MAX_TURN_DETECTION_BUFFER_SAMPLES = 8 * 16000; // 8 seconds max for turn detection
+
+// Configurable server URLs with fallbacks
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+const MODELS_BASE_URL = import.meta.env.VITE_MODELS_BASE_URL || `${API_BASE_URL}/models`;
+
+type AppStatus = "idle" | "loading" | "recording" | "error";
+
+const App = (): JSX.Element => {
+  const [status, setStatus] = useState<AppStatus>("idle");
+  const [currentError, setCurrentError] = useState<string | null>(null);
+  // const [currentResponse, setCurrentResponse] = useState<string | null>(null);
+  // const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
+  // const [visualizerAnalyser, setVisualizerAnalyser] = useState<AnalyserNode | null>(null);
+
+  // const vadRef = useRef<VadIterator | null>(null);
+  // const openaiTranscriptionRef = useRef<OpenAIRealtimeTranscription | null>(null);
+  // const smartTurnRef = useRef<SmartTurnV3 | null>(null);
+  // const audioContextRef = useRef<AudioContext | null>(null);
+  // const mediaStreamRef = useRef<MediaStream | null>(null);
+  // const analyserNodeRef = useRef<AnalyserNode | null>(null);
+  // const recordedChunksRef = useRef<Float32Array[]>([]);
+  // const lastTranscriptionTimeRef = useRef(0);
+  // const currentSpeechBufferRef = useRef<Float32Array[]>([]);
+  // const ringBufferRef = useRef<RingBuffer | null>(null);
+  // const turnDetectionBufferRef = useRef<Float32Array[]>([]);
+  // const pendingTranscriptionRef = useRef("");
+  // const isProcessingOpenAIRef = useRef(false);
+  // const lastRequestTimestampRef = useRef(0);
+  // const lastUserSpeechTimeRef = useRef(0);
+  // const lastTranscribedAudioLengthRef = useRef(0);
+  // const isTranscribingRef = useRef(false);
+  // const transcriptionQueueRef = useRef<TranscriptionJob[]>([]);
+  // const speechStartedRef = useRef(false);
+  // const silenceCounterRef = useRef(0);
+  // const silenceTimeoutRef = useRef<number | null>(null);
+  // const toggleInProgressRef = useRef(false);
+  // const isRecordingRef = useRef(false);
+
+  // const isRecording = status === "recording";
+
+  // const updateStatus = (newStatus: AppStatus, errorMsg?: string) => {
+  //   const prevStatus = status;
+  //   console.log(`updateStatus: ${prevStatus} → ${newStatus}, error: ${errorMsg}`);
+
+  //   setStatus(newStatus);
+  //   if (newStatus === "error" && errorMsg) {
+  //     setCurrentError(errorMsg);
+  //   } else {
+  //     setCurrentError(null);
+  //   }
+
+  //   // Update recording ref to always be in sync
+  //   const newIsRecording = newStatus === "recording";
+  //   isRecordingRef.current = newIsRecording;
+
+  //   console.log(`Sending recording state: ${newIsRecording} (status: ${prevStatus} → ${newStatus})`);
+  //   window.electronAPI?.sendRecordingState?.(newIsRecording);
+  // };
+
+  // const displayTranscription = (transcription: string, timestamp: number) => {
+  //   console.log(`[${formatTimestamp(timestamp)}] User: ${transcription}`);
+  //   // setTranscriptions((prev) => [...prev, { text: transcription, timestamp }]);
+  // };
+
+  // const displayOpenAIResponse = (responseText: string, timestamp: number) => {
+  //   console.log(`[${formatTimestamp(timestamp)}] Assistant: ${responseText}`);
+  //   setCurrentResponse(responseText);
+  // };
+
+  // const formatTimestamp = (timestamp: number): string => {
+  //   return new Date(timestamp).toLocaleTimeString();
+  // };
+
+  // const combineAudioChunks = (chunks: Float32Array[]): Float32Array => {
+  //   if (chunks.length === 0) {
+  //     return new Float32Array(0);
+  //   }
+
+  //   const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  //   const combined = new Float32Array(totalLength);
+  //   let offset = 0;
+
+  //   for (const chunk of chunks) {
+  //     combined.set(chunk, offset);
+  //     offset += chunk.length;
+  //   }
+
+  //   return combined;
+  // };
+
+  // const resample16to24 = (input: Float32Array): Float32Array => {
+  //   const inputSampleRate = 16000;
+  //   const outputSampleRate = 24000;
+  //   const ratio = outputSampleRate / inputSampleRate;
+  //   const outputLength = Math.floor(input.length * ratio);
+  //   const output = new Float32Array(outputLength);
+
+  //   for (let i = 0; i < outputLength; i++) {
+  //     const inputIndex = i / ratio;
+  //     const inputIndexFloor = Math.floor(inputIndex);
+  //     const inputIndexCeil = Math.min(inputIndexFloor + 1, input.length - 1);
+  //     const fraction = inputIndex - inputIndexFloor;
+  //     output[i] =
+  //       input[inputIndexFloor] * (1 - fraction) + input[inputIndexCeil] * fraction;
+  //   }
+
+  //   return output;
+  // };
+
+  // const clearVisualizerAnalyser = () => {
+  //   if (analyserNodeRef.current) {
+  //     try {
+  //       analyserNodeRef.current.disconnect();
+  //     } catch (error) {
+  //       console.warn("analyser disconnect failed", error);
+  //     }
+  //     analyserNodeRef.current = null;
+  //   }
+  //   setVisualizerAnalyser(null);
+  // };
+
+  // const sendToOpenAI = async (transcription: string) => {
+  //   if (!transcription.trim() || isProcessingOpenAIRef.current) {
+  //     return;
+  //   }
+
+  //   isProcessingOpenAIRef.current = true;
+  //   lastRequestTimestampRef.current = Date.now();
+
+  //   try {
+  //     // Take screenshot before sending to API
+  //     let screenshotBase64: string | undefined;
+  //     try {
+  //       const screenshotResult = await window.electronAPI.takeScreenshot();
+  //       if (screenshotResult.success && screenshotResult.image) {
+  //         screenshotBase64 = screenshotResult.image;
+  //         console.log(`Screenshot captured: ${screenshotResult.width}x${screenshotResult.height} (resized from ${screenshotResult.originalWidth}x${screenshotResult.originalHeight})`);
+  //       } else {
+  //         console.warn('Screenshot failed:', screenshotResult.error);
+  //       }
+  //     } catch (screenshotError) {
+  //       console.error('Error taking screenshot:', screenshotError);
+  //       // Continue without screenshot if it fails
+  //     }
+
+  //     // Build request body with text and optional image
+  //     const requestBody: { text: string; image?: string } = {
+  //       text: transcription,
+  //     };
+
+  //     if (screenshotBase64) {
+  //       requestBody.image = screenshotBase64;
+  //     }
+
+  //     const response = await fetch(`${API_BASE_URL}/generate`, {
+  //       method: "POST",
+  //       headers: {
+  //         "Content-Type": "application/json",
+  //       },
+  //       body: JSON.stringify(requestBody),
+  //     });
+
+  //     if (!response.ok) {
+  //       throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  //     }
+
+  //     const data = await response.json();
+  //     const responseLines: string[] = [];
+
+  //     // Handle the new server response format
+  //     const text = data?.text;
+  //     if (typeof text === "string" && text.trim()) {
+  //       responseLines.push(text.trim());
+  //     }
+
+  //     // Handle tool calls from the new API format
+  //     const toolCalls = Array.isArray(data?.toolCalls) ? data.toolCalls : [];
+  //     for (const call of toolCalls) {
+  //       console.log(call);
+  //       const toolName = call?.toolName ?? "unknown_tool";
+  //       const args = call?.input ?? {};
+  //       const argsStr = JSON.stringify(args);
+  //       responseLines.push(`Called ${toolName}(${argsStr})`);
+
+  //       // Execute tool calls with proper error handling
+  //       try {
+  //         let result;
+  //         if (toolName === "open") {
+  //           result = await window.electronAPI.openTool(args);
+  //         } else if (toolName === "scroll") {
+  //           result = await window.electronAPI.scrollTool(args);
+  //         } else if (toolName === "click") {
+  //           result = await window.electronAPI.clickTool(args);
+  //         } else if (toolName === "keys") {
+  //           result = await window.electronAPI.keysTool(args);
+  //         } else {
+  //           console.warn(`Unknown tool: ${toolName}`);
+  //           continue;
+  //         }
+
+  //         console.log(`Result from ${toolName}:`, result);
+
+  //         // Add result info to response if tool execution failed
+  //         if (result && !result.success) {
+  //           responseLines.push(`${toolName} failed: ${result.output || 'Unknown error'}`);
+  //         }
+  //       } catch (toolError) {
+  //         console.error(`Error executing tool ${toolName}:`, toolError);
+  //         responseLines.push(`${toolName} error: ${toolError instanceof Error ? toolError.message : 'Unknown error'}`);
+  //       }
+  //     }
+
+  //     // Fallback if no content
+  //     if (!responseLines.length) {
+  //       if (data) {
+  //         responseLines.push(JSON.stringify(data));
+  //       } else {
+  //         responseLines.push("No response received");
+  //       }
+  //     }
+
+  //     const responseText = responseLines.join("\n");
+  //     if (lastUserSpeechTimeRef.current <= lastRequestTimestampRef.current) {
+  //       displayOpenAIResponse(responseText, Date.now());
+  //     }
+  //   } catch (error) {
+  //     console.error("Error getting generator response:", error);
+  //     if (lastUserSpeechTimeRef.current <= lastRequestTimestampRef.current) {
+  //       const errorMsg = "Error getting response from generator";
+  //       console.log(`[${formatTimestamp(Date.now())}] Assistant: ${errorMsg}`);
+  //       setCurrentResponse(errorMsg);
+  //     }
+  //   } finally {
+  //     isProcessingOpenAIRef.current = false;
+  //   }
+  // };
+
+  // const transcribeSpeech = async (audioData: Float32Array) => {
+  //   const openaiTranscription = openaiTranscriptionRef.current;
+  //   const smartTurn = smartTurnRef.current;
+  //   if (!openaiTranscription || !smartTurn) {
+  //     return;
+  //   }
+  // }
+
+  // const transcribeSpeechLocal = async (
+  //   audioData: Float32Array,
+  //   reason: "speech_end" | "timer",
+  // ) => {
+  //   const openaiTranscription = openaiTranscriptionRef.current;
+  //   const smartTurn = smartTurnRef.current;
+  //   if (!openaiTranscription || !smartTurn) {
+  //     return;
+  //   }
+
+  //   // Debug: Save audio file to disk before transcription
+  //   try {
+  //     const filename = `audio_${reason}_${Date.now()}`;
+  //     const saveResult = await window.electronAPI.saveAudioFile(audioData, filename);
+  //     if (saveResult.success) {
+  //       console.log(`[DEBUG] Audio saved to: ${saveResult.path}`);
+  //     } else {
+  //       console.warn(`[DEBUG] Failed to save audio file: ${saveResult.error}`);
+  //     }
+  //   } catch (error) {
+  //     console.warn(`[DEBUG] Error saving audio file:`, error);
+  //   }
+
+  //   if (isTranscribingRef.current) {
+  //     transcriptionQueueRef.current.push({ data: audioData, reason });
+  //     // Prevent memory leak by limiting transcription queue
+  //     const MAX_TRANSCRIPTION_QUEUE = 20;
+  //     if (transcriptionQueueRef.current.length > MAX_TRANSCRIPTION_QUEUE) {
+  //       console.warn("Transcription queue overflow, dropping oldest request");
+  //       transcriptionQueueRef.current.shift();
+  //     }
+  //     return;
+  //   }
+
+  //   isTranscribingRef.current = true;
+
+  //   const processOne = async (data: Float32Array, why: "speech_end" | "timer"): Promise<void> => {
+  //     try {
+  //       const resampledData = resample16to24(data);
+
+  //       // Debug: Save resampled audio file (24kHz version sent to OpenAI)
+  //       try {
+  //         const resampledFilename = `resampled_${why}_${Date.now()}`;
+  //         const saveResult = await window.electronAPI.saveAudioFile(resampledData, resampledFilename);
+  //         if (saveResult.success) {
+  //           console.log(`[DEBUG] Resampled audio saved to: ${saveResult.path}`);
+  //         }
+  //       } catch (error) {
+  //         console.warn(`[DEBUG] Error saving resampled audio:`, error);
+  //       }
+
+  //       const transcription = await openaiTranscription.transcribe(resampledData);
+  //       const trimmed = transcription.trim();
+  //       if (trimmed) {
+  //         displayTranscription(trimmed, Date.now());
+  //         pendingTranscriptionRef.current = pendingTranscriptionRef.current
+  //           ? `${pendingTranscriptionRef.current} ${trimmed}`
+  //           : trimmed;
+
+  //         turnDetectionBufferRef.current.push(data);
+
+  //         let totalSamples = turnDetectionBufferRef.current.reduce(
+  //           (sum, chunk) => sum + chunk.length,
+  //           0,
+  //         );
+  //         while (
+  //           totalSamples > MAX_TURN_DETECTION_BUFFER_SAMPLES &&
+  //           turnDetectionBufferRef.current.length > 1
+  //         ) {
+  //           const removed = turnDetectionBufferRef.current.shift();
+  //           if (removed) {
+  //             totalSamples -= removed.length;
+  //           }
+  //         }
+
+  //         if (why === "speech_end") {
+  //           const combinedAudio = combineAudioChunks(turnDetectionBufferRef.current);
+  //           const turnResult = await smartTurn.predictEndpoint(combinedAudio);
+  //           console.log(`Turn detection (reason=${why}): prediction=${turnResult.prediction}, probability=${turnResult.probability.toFixed(3)}`);
+  //           if (turnResult.prediction === 1) {
+  //             if (
+  //               pendingTranscriptionRef.current.trim() &&
+  //               !isProcessingOpenAIRef.current
+  //             ) {
+  //               const transcriptionToSend = pendingTranscriptionRef.current.trim();
+  //               pendingTranscriptionRef.current = "";
+  //               await sendToOpenAI(transcriptionToSend);
+  //               turnDetectionBufferRef.current = [];
+  //             }
+  //           }
+  //         } else {
+  //           console.log("Timer-based transcription buffered (no endpoint check)");
+  //         }
+  //       }
+  //     } catch (error) {
+  //       console.error("Error transcribing speech or detecting turn:", error);
+  //     }
+  //   };
+
+  //   try {
+  //     await processOne(audioData, reason);
+  //     while (transcriptionQueueRef.current.length > 0) {
+  //       const next = transcriptionQueueRef.current.shift();
+  //       if (next) {
+  //         await processOne(next.data, next.reason);
+  //       }
+  //     }
+  //   } finally {
+  //     isTranscribingRef.current = false;
+  //   }
+  // };
+
+  // const VAD_WINDOW_SIZE = 512;
+
+  /*
+  Audio buffer = RingBuffer(2 seconds)
+  Speech buffer = RingBuffer(Infty seconds)
+
+  On audio chunk:
+    If is_speaking, add audio chunk to speech buffer
+    Add audio chunk to audio buffer
+    Run VAD on last 512 samples of audio buffer
+
+  On speech start:
+    Set is_speaking = true
+    Set speech buffer to audio buffer
+    Start turn detector on speech buffer
+
+  On turn complete:
+    (Check if VAD agrees)
+    Transcribe speech buffer
+  */
+
+  /*
+  isSpeaking = false;
+  onSpeechStart = () => { turnDetector.start(); isSpeaking = true; };
+  onTurnComplete = () => { transcribe(); };
+  const vad = new VAD(audioSource, onSpeechStart, onSpeechEnd);
+  const turnDetector = new TurnDetector(audioSource, onTurnIncomplete, onTurnComplete);
+  vad.start();
+  */
+
+  /*
+  const vad = new VAD(audioSource);
+  const turnDetector = new TurnDetector(audioSource);
+  vad.start();
+  (async () => {
+    for await (const evt of vad) {
+      if (evt.type === 'speechstart') {
+        turnDetector.start();
+      } else if (evt.type === 'speechend') {
+        // do thing
+      }
+    }
+  })();
+  (async () => {
+    for await (const evt of turnDetector) {
+      if (evt.type === 'complete') {
+        // do thing
+      } else if (evt.type === 'incomplete') {
+        // do thing
+      }
+    }
+  })
+  */
+  // vad = VAD(audioSource);
+  // while (true) {
+  //   vadResult = await vad.process(audioSource);
+  // }
+
+//   const processAudioChunk = async (audioChunk: Float32Array) => {
+//     // # BUG: this runs VAD on every processAudioChunk after vad_buffer fills up initially
+//     // vad_buffer.append(audio_chunk)   # vad_buffer is ring buffer of size 512
+//     // if len(vad_buffer) < VAD_MIN: return
+//     // result = vad(vad_buffer)
+//     // if is_speaking != result.speaking:
+//     //   is_speaking = result.speaking
+//     // if is_speaking:
+//     //   speech_buffer.append(audio_chunk)   # speech_buffer is ring buffer of size 128k (8 seconds)
+//     // else if len(speech_buffer) >= TRANSCRIBE_MIN:
+//     //   transcribe(speech_buffer)
+//     const vad = vadRef.current;
+//     const ringBuffer = ringBufferRef.current;
+//     if (!vad || !ringBuffer) return;
+
+//     const preChunkBufferedAudio = ringBuffer.read();
+
+//     for (let i = 0; i < audioChunk.length; i += VAD_WINDOW_SIZE) {
+//       const chunk = audioChunk.slice(i, Math.min(i + VAD_WINDOW_SIZE, audioChunk.length));
+//       if (chunk.length === VAD_WINDOW_SIZE) {
+//         await vad.predict(chunk);
+//       }
+//     }
+
+//     const hasCurrentSpeech = vad.triggered;
+
+//     if (hasCurrentSpeech && !speechStartedRef.current) {
+//       speechStartedRef.current = true;
+//       silenceCounterRef.current = 0;
+//       lastUserSpeechTimeRef.current = Date.now();
+//       lastTranscribedAudioLengthRef.current = 0;
+
+//       currentSpeechBufferRef.current = [];
+//       if (preChunkBufferedAudio.length > 0) {
+//         currentSpeechBufferRef.current.push(preChunkBufferedAudio);
+//       }
+//       currentSpeechBufferRef.current.push(audioChunk);
+//     } else if (speechStartedRef.current) {
+//       currentSpeechBufferRef.current.push(audioChunk);
+
+//       if (!hasCurrentSpeech) {
+//         silenceCounterRef.current += 1;
+//         if (silenceCounterRef.current >= SILENCE_THRESHOLD) {
+//           const currentAudio = combineAudioChunks(currentSpeechBufferRef.current);
+//           if (
+//             currentAudio.length > 0 &&
+//             currentAudio.length > lastTranscribedAudioLengthRef.current
+//           ) {
+//             const previousLength = lastTranscribedAudioLengthRef.current;
+//             const targetLength = currentAudio.length;
+//             const newAudio = currentAudio.slice(previousLength);
+//             if (newAudio.length >= MIN_TRANSCRIBE_SAMPLES) {
+//               lastTranscribedAudioLengthRef.current = targetLength;
+//               try {
+//                 await transcribeSpeechLocal(newAudio, "speech_end");
+//               } catch (error) {
+//                 lastTranscribedAudioLengthRef.current = previousLength;
+//                 throw error;
+//               }
+//             }
+//           }
+//           currentSpeechBufferRef.current = [];
+//           lastTranscriptionTimeRef.current = Date.now();
+//           speechStartedRef.current = false;
+//           silenceCounterRef.current = 0;
+//         }
+//       } else {
+//         silenceCounterRef.current = 0;
+//       }
+//     }
+
+//     const now = Date.now();
+//     if (
+//       now - lastTranscriptionTimeRef.current >= 5000 &&
+//       currentSpeechBufferRef.current.length > 0
+//     ) {
+//       const currentAudio = combineAudioChunks(currentSpeechBufferRef.current);
+//       if (currentAudio.length > lastTranscribedAudioLengthRef.current) {
+//         const previousLength = lastTranscribedAudioLengthRef.current;
+//         const targetLength = currentAudio.length;
+//         const newAudio = currentAudio.slice(previousLength);
+//         if (newAudio.length >= MIN_TRANSCRIBE_SAMPLES) {
+//           lastTranscribedAudioLengthRef.current = targetLength;
+//           try {
+//             await transcribeSpeechLocal(newAudio, "timer");
+//           } catch (error) {
+//             lastTranscribedAudioLengthRef.current = previousLength;
+//             throw error;
+//           }
+//         }
+//         lastTranscriptionTimeRef.current = now;
+//       }
+//     }
+
+//     ringBuffer.write(audioChunk);
+//   };
+
+//   const initializeModels = async () => {
+//     try {
+//       updateStatus("loading");
+//       const vad = new VadIterator(`${MODELS_BASE_URL}/silero_vad.onnx`);
+//       await vad.init();
+//       vadRef.current = vad;
+
+//       updateStatus("loading");
+//       const smartTurn = new SmartTurnV3();
+//       await smartTurn.init();
+//       smartTurnRef.current = smartTurn;
+
+//       updateStatus("loading");
+
+//       const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+//       if (!apiKey) {
+//         throw new Error("VITE_OPENAI_API_KEY not found in environment variables");
+//       }
+
+//       const openaiTranscription = new OpenAIRealtimeTranscription(apiKey, 24000);
+//       await openaiTranscription.init();
+//       openaiTranscriptionRef.current = openaiTranscription;
+
+//       updateStatus("idle");
+//       return true;
+//     } catch (error) {
+//       console.error("Failed to initialize models:", error);
+//       updateStatus("error", "Failed to load models or connect to OpenAI");
+//       return false;
+//     }
+//   };
+
+//   const createAudioProcessorBlob = () => {
+//     const processorCode = `
+//       class VADProcessor extends AudioWorkletProcessor {
+//         constructor() {
+//           super();
+//           this.bufferSize = 512;
+//           this.buffer = new Float32Array(this.bufferSize);
+//           this.bufferIndex = 0;
+//         }
+
+//         process(inputs) {
+//           const input = inputs[0];
+//           if (input.length > 0) {
+//             const inputChannel = input[0];
+
+//             for (let i = 0; i < inputChannel.length; i++) {
+//               this.buffer[this.bufferIndex] = inputChannel[i];
+//               this.bufferIndex++;
+
+//               if (this.bufferIndex >= this.bufferSize) {
+//                 this.port.postMessage({
+//                   audioData: Array.from(this.buffer)
+//                 });
+
+//                 this.bufferIndex = 0;
+//               }
+//             }
+//           }
+
+//           return true;
+//         }
+//       }
+
+//       registerProcessor('vad-processor', VADProcessor);
+//     `;
+
+//     return URL.createObjectURL(
+//       new Blob([processorCode], { type: "application/javascript" }),
+//     );
+//   };
+
+//   const startRecording = async () => {
+//     try {
+//       updateStatus("loading");
+
+//       const stream = await navigator.mediaDevices.getUserMedia({
+//         audio: {
+//           sampleRate: 16000,
+//           channelCount: 1,
+//           echoCancellation: true,
+//           noiseSuppression: true,
+//         },
+//       });
+
+//       mediaStreamRef.current = stream;
+//       const AudioContext = window.AudioContext;
+//       if (!AudioContext) {
+//         throw new Error("Web Audio API not supported in this browser");
+//       }
+
+//       const audioContext = new AudioContext({ sampleRate: 16000 });
+//       audioContextRef.current = audioContext;
+//       const source = audioContext.createMediaStreamSource(stream);
+
+//       if (!vadRef.current || !openaiTranscriptionRef.current) {
+//         const initialized = await initializeModels();
+//         if (!initialized) {
+//           stream.getTracks().forEach((track) => track.stop());
+//           mediaStreamRef.current = null;
+//           clearVisualizerAnalyser();
+//           return;
+//         }
+//       }
+
+//       const workletUrl = createAudioProcessorBlob();
+//       try {
+//         await audioContext.audioWorklet.addModule(workletUrl);
+//       } finally {
+//         URL.revokeObjectURL(workletUrl);
+//       }
+
+//       const processorNode = new AudioWorkletNode(audioContext, "vad-processor");
+//       processorNode.port.onmessage = async (event: MessageEvent<{ audioData: number[] }>) => {
+//         const audioChunk = new Float32Array(event.data.audioData);
+//         recordedChunksRef.current.push(audioChunk);
+//         await processAudioChunk(audioChunk);
+//       };
+
+//       const analyserNode = audioContext.createAnalyser();
+//       analyserNode.fftSize = 256;
+//       analyserNode.smoothingTimeConstant = 0.8;
+//       source.connect(analyserNode);
+//       analyserNodeRef.current = analyserNode;
+//       setVisualizerAnalyser(analyserNode);
+
+//       source.connect(processorNode);
+//       processorNode.connect(audioContext.destination);
+
+//       recordedChunksRef.current = [];
+//       currentSpeechBufferRef.current = [];
+//       lastTranscriptionTimeRef.current = Date.now();
+//       speechStartedRef.current = false;
+//       silenceCounterRef.current = 0;
+//       turnDetectionBufferRef.current = [];
+//       pendingTranscriptionRef.current = "";
+//       isProcessingOpenAIRef.current = false;
+//       lastRequestTimestampRef.current = 0;
+//       lastUserSpeechTimeRef.current = 0;
+//       lastTranscribedAudioLengthRef.current = 0;
+
+//       ringBufferRef.current = new RingBuffer(16000);
+
+//       updateStatus("recording");
+//     } catch (error) {
+//       console.error("Error starting recording:", error);
+//       clearVisualizerAnalyser();
+//       updateStatus("error", "Failed to access microphone");
+//     }
+//   };
+
+//   const toggleRecording = async () => {
+//     const currentIsRecording = isRecordingRef.current || status === "recording";
+//     console.log(`toggleRecording called - status: ${status}, isRecording (state): ${isRecording}, isRecording (ref): ${currentIsRecording}, toggleInProgress: ${toggleInProgressRef.current}`);
+
+//     // Prevent multiple simultaneous toggles with atomic operation
+//     if (toggleInProgressRef.current) {
+//       console.log('Toggle already in progress, ignoring...');
+//       return;
+//     }
+
+//     // Set toggle in progress atomically
+//     toggleInProgressRef.current = true;
+
+//     try {
+//       // Double-check state hasn't changed since we started
+//       const finalIsRecording = isRecordingRef.current || status === "recording";
+
+//       if (finalIsRecording) {
+//         console.log('Stopping recording...');
+//         await stopRecording();
+//       } else {
+//         console.log('Starting recording...');
+//         await startRecording();
+//       }
+//     } catch (error) {
+//       console.error('Error during recording toggle:', error);
+//       // Ensure we're in a consistent state after error
+//       if (isRecordingRef.current && (status === "error" || status === "idle")) {
+//         updateStatus("idle");
+//       }
+//     } finally {
+//       // Always clear the toggle flag
+//       toggleInProgressRef.current = false;
+//     }
+//   };
+
+//   const stopRecording = async () => {
+//     if (!isRecordingRef.current) {
+//       console.log('stopRecording called but not currently recording, ignoring');
+//       return;
+//     }
+
+//     updateStatus("idle");
+//     clearVisualizerAnalyser();
+
+//     if (silenceTimeoutRef.current !== null) {
+//       clearTimeout(silenceTimeoutRef.current);
+//       silenceTimeoutRef.current = null;
+//     }
+
+//     if (pendingTranscriptionRef.current.trim() && !isProcessingOpenAIRef.current) {
+//       const transcriptionToSend = pendingTranscriptionRef.current.trim();
+//       pendingTranscriptionRef.current = "";
+//       await sendToOpenAI(transcriptionToSend);
+//     }
+
+//     const audioContext = audioContextRef.current;
+//     audioContextRef.current = null;
+
+//     if (mediaStreamRef.current) {
+//       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+//       mediaStreamRef.current = null;
+//     }
+
+//     if (audioContext) {
+//       await audioContext.close();
+//     }
+
+//     if (ringBufferRef.current) {
+//       ringBufferRef.current.clear();
+//       ringBufferRef.current = null;
+//     }
+
+//     // If no audio was recorded, just stay in idle state (not an error)
+//     if (recordedChunksRef.current.length === 0) {
+//       return;
+//     }
+
+//     // Process recorded audio silently in the background without changing UI state
+//     try {
+//       const totalLength = recordedChunksRef.current.reduce(
+//         (sum, chunk) => sum + chunk.length,
+//         0,
+//       );
+//       const combinedAudio = new Float32Array(totalLength);
+//       let offset = 0;
+
+//       for (const chunk of recordedChunksRef.current) {
+//         combinedAudio.set(chunk, offset);
+//         offset += chunk.length;
+//       }
+
+//       const vad = vadRef.current;
+//       if (vad) {
+//         await vad.process(combinedAudio);
+//         vad.getSpeechTimestamps();
+//       }
+//     } catch (error) {
+//       console.error("Error processing recorded audio:", error);
+//       // Don't change UI state for post-processing errors
+//     }
+//   };
+
+
+//   useEffect(() => {
+//     // Listen for tray toggle recording events
+//     const removeToggleListener = window.electronAPI?.onToggleRecording?.(toggleRecording);
+
+//     // Listen for cursor position updates from main process
+//     const removeCursorListener = window.electronAPI?.onCursorUpdate?.((coordinates: { x: number; y: number }) => {
+//       setCursorPosition(coordinates);
+//     });
+
+//     return () => {
+//       if (silenceTimeoutRef.current !== null) {
+//         clearTimeout(silenceTimeoutRef.current);
+//         silenceTimeoutRef.current = null;
+//       }
+
+//       clearVisualizerAnalyser();
+
+//       const context = audioContextRef.current;
+//       if (context) {
+//         context.close().catch(() => undefined);
+//         audioContextRef.current = null;
+//       }
+
+//       if (mediaStreamRef.current) {
+//         mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+//         mediaStreamRef.current = null;
+//       }
+
+//       // Clean up tray toggle listener
+//       if (removeToggleListener) {
+//         removeToggleListener();
+//       }
+
+//       // Clean up cursor update listener
+//       if (removeCursorListener) {
+//         removeCursorListener();
+//       }
+//     };
+//   }, []);
+
+
+//   return (
+//     <main className="relative flex min-h-screen w-full flex-col overflow-hidden font-sans leading-relaxed text-gray-800">
+//       <div className="pointer-events-none absolute inset-0 -z-10">
+//         <Cursor analyser={visualizerAnalyser} status={status} currentResponse={currentResponse} position={cursorPosition}/>
+//       </div>
+
+//       {currentError && (
+//         <ErrorMessage error={currentError}/>
+//       )}
+//     </main>
+//   );
+
+  return (
+    <main>
+      <div>
+        <Cursor status={status}/>
+      </div>
+
+      <ErrorMessage error={currentError}/>
+    </main>
+  )
+};
+
+export default App;

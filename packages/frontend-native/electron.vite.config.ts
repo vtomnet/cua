@@ -1,7 +1,8 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import svgr from "vite-plugin-svgr";
+import path from "path";
 
 export default defineConfig({
   main: {
@@ -21,14 +22,50 @@ export default defineConfig({
     }
   },
   renderer: {
+    envDir: path.resolve(__dirname, "../.."),
     root: "./src/renderer",
+    publicDir: "./src/renderer/public",
     plugins: [
       react(),
       tailwindcss(),
       svgr(),
     ],
+    resolve: {
+      conditions: ['onnxruntime-web-use-extern-wasm', 'import', 'module', 'browser', 'default'],
+    },
+    optimizeDeps: {
+      exclude: ["onnxruntime-web"],
+    },
+    assetsInclude: ["**/*.wasm", "**/*.mjs"],
     build: {
-      outDir: "dist/renderer"
+      outDir: "dist/renderer",
+      commonjsOptions: {
+        transformMixedEsModules: true,
+      },
+      rollupOptions: {
+        external: ['onnxruntime-web'],
+        output: {
+          assetFileNames: (assetInfo) => {
+            // Keep WASM files without hash for predictable paths
+            if (assetInfo.name && assetInfo.name.endsWith('.wasm')) {
+              return '[name][extname]';
+            }
+            if (assetInfo.name && assetInfo.name.endsWith('.mjs')) {
+              return '[name][extname]';
+            }
+            return '[name]-[hash][extname]';
+          },
+          paths: {
+            'onnxruntime-web': './ort.min.mjs'
+          },
+        },
+        treeshake: {
+          moduleSideEffects: (id) => {
+            // Don't tree-shake onnxruntime-web - preserve all exports
+            return id.includes('onnxruntime-web');
+          },
+        },
+      },
     }
   },
 });

@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "main": "./dist/main/index.js",
   "scripts": {
-    "build": "electron-vite build",
+    "build": "electron-vite build && bun run postbuild",
+    "postbuild": "cp src/renderer/public/assets/*.wasm dist/renderer/ && cp src/renderer/public/assets/*ort*.mjs dist/renderer/ && cp src/renderer/public/assets/*.wasm dist/renderer/assets/ && cp src/renderer/public/assets/*ort*.mjs dist/renderer/assets/",
     "dev": "electron-vite dev",
     "start": "bun run build && bun run dev",
     "//dev:react": "vite",

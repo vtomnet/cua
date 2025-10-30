@@ -10,3 +10,8 @@ declare module '*.png' {
   const src: string;
   export default src;
 }
+
+declare module '*.onnx?url' {
+  const src: string;
+  export default src;
+}
