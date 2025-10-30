@@ -1,19 +1,25 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import CursorSVG from "../../../assets/cursor.svg?react";
 
 type CursorProps = {
   analyser: AnalyserNode | null;
   status: "idle" | "loading" | "recording" | "error";
   currentResponse: string | null;
+  position: { x: number; y: number } | null;
 };
 
-const Cursor = ({ analyser, status, currentResponse }: CursorProps): JSX.Element => {
+const Cursor = ({ analyser, status, currentResponse, position }: CursorProps): JSX.Element => {
   const analyserRef = useRef<AnalyserNode | null>(analyser);
   const dataArrayRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const isRecordingRef = useRef(status === "recording");
   const smoothedVolumeRef = useRef(0);
   const animationFrameRef = useRef<number>();
   const glowRef = useRef<HTMLDivElement>(null);
+
+  // Cursor position state for smooth animation
+  const [animatedPosition, setAnimatedPosition] = useState<{ x: number; y: number } | null>(null);
+  const targetPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const animatedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
   const getGlowColor = () => {
     switch (status) {
@@ -43,11 +49,41 @@ const Cursor = ({ analyser, status, currentResponse }: CursorProps): JSX.Element
     isRecordingRef.current = status === "recording";
   }, [status]);
 
+  // Update target position when position prop changes
+  useEffect(() => {
+    if (position) {
+      targetPositionRef.current = position;
+
+      // If this is the first position, set it immediately without animation
+      if (!animatedPositionRef.current) {
+        animatedPositionRef.current = { ...position };
+        setAnimatedPosition({ ...position });
+      }
+    }
+  }, [position]);
+
   useEffect(() => {
     const animate = () => {
       const analyserNode = analyserRef.current;
       const dataArray = dataArrayRef.current;
       let volume = 0;
+
+      // Animate cursor position
+      const targetPos = targetPositionRef.current;
+      const currentPos = animatedPositionRef.current;
+
+      if (targetPos && currentPos) {
+        const lerp = 0.15; // Smoothing factor (0 = no movement, 1 = instant)
+        const newX = currentPos.x + (targetPos.x - currentPos.x) * lerp;
+        const newY = currentPos.y + (targetPos.y - currentPos.y) * lerp;
+
+        // Update position if there's meaningful movement
+        const distanceThreshold = 0.1;
+        if (Math.abs(newX - currentPos.x) > distanceThreshold || Math.abs(newY - currentPos.y) > distanceThreshold) {
+          animatedPositionRef.current = { x: newX, y: newY };
+          setAnimatedPosition({ x: newX, y: newY });
+        }
+      }
 
       if (analyserNode && dataArray) {
         analyserNode.getByteFrequencyData(dataArray);
@@ -106,30 +142,48 @@ const Cursor = ({ analyser, status, currentResponse }: CursorProps): JSX.Element
     };
   }, [status]);
 
+  // Calculate cursor position styles
+  const cursorStyle = animatedPosition
+    ? {
+        position: 'absolute' as const,
+        left: `${animatedPosition.x}px`,
+        top: `${animatedPosition.y}px`,
+        transform: 'translate(-24px, -24px)', // Center the cursor (48px / 2 = 24px)
+        transition: 'none', // Disable CSS transitions since we're handling animation manually
+      }
+    : {
+        position: 'relative' as const,
+        transform: 'none',
+      };
+
   return (
     <div className="relative h-full w-full bg-transparent flex items-center justify-center">
-      {/* Status glow background */}
-      <div
-        ref={glowRef}
-        className={`absolute w-16 h-16 ${getGlowColor()} rounded-full`}
-        style={{
-          filter: 'blur(12px)',
-          opacity: 0.4,
-        }}
-      />
+      {/* Cursor container - either positioned absolutely or centered */}
+      <div style={cursorStyle}>
+        {/* Status glow background */}
+        <div
+          ref={glowRef}
+          className={`absolute w-16 h-16 ${getGlowColor()} rounded-full`}
+          style={{
+            filter: 'blur(12px)',
+            opacity: 0.4,
+            transform: 'translate(-4.5px, 3px)',
+          }}
+        />
 
-      {/* Cursor SVG */}
-      <div className="relative z-10">
-        <CursorSVG width={48} height={48} style={{ transform: 'scaleX(-1)' }} />
+        {/* Cursor SVG */}
+        <div className="relative z-10">
+          <CursorSVG width={48} height={48} style={{ transform: 'scaleX(-1)' }} />
 
-        {/* Floating response message - positioned at southeast corner of cursor */}
-        {currentResponse && (
-          <div className="absolute top-8 -right-2 max-w-sm max-h-32 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg border border-gray-200 p-3 text-sm text-gray-800 pointer-events-none animate-in fade-in duration-300 overflow-y-auto">
-            <div className="whitespace-pre-line break-words">
-              {currentResponse}
+          {/* Floating response message - positioned at southeast corner of cursor */}
+          {currentResponse && (
+            <div className="absolute top-8 -right-2 max-w-sm max-h-32 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg border border-gray-200 p-3 text-sm text-gray-800 pointer-events-none animate-in fade-in duration-300 overflow-y-auto">
+              <div className="whitespace-pre-line break-words">
+                {currentResponse}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

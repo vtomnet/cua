@@ -11,6 +11,7 @@ import {
 } from "frontend-core";
 import "./app.css";
 import Cursor from "./components/Cursor";
+import ErrorMessage from "./components/ErrorMessage";
 
 // library.add(fas, far, fab);
 
@@ -21,7 +22,6 @@ type TranscriptionJob = {
 
 const MIN_TRANSCRIBE_SAMPLES = Math.ceil(16000 * 0.1);
 const SILENCE_THRESHOLD = 10;
-const MAX_AUDIO_BUFFER_CHUNKS = 500; // Limit buffer growth (~25 seconds at 512 samples/chunk)
 const MAX_TURN_DETECTION_BUFFER_SAMPLES = 8 * 16000; // 8 seconds max for turn detection
 
 // Configurable server URLs with fallbacks
@@ -34,9 +34,8 @@ const App = (): JSX.Element => {
   const [status, setStatus] = useState<AppStatus>("idle");
   const [currentError, setCurrentError] = useState<string | null>(null);
   const [currentResponse, setCurrentResponse] = useState<string | null>(null);
-  const [visualizerAnalyser, setVisualizerAnalyser] = useState<
-    AnalyserNode | null
-  >(null);
+  const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
+  const [visualizerAnalyser, setVisualizerAnalyser] = useState<AnalyserNode | null>(null);
 
   const vadRef = useRef<VadIterator | null>(null);
   const openaiTranscriptionRef = useRef<OpenAIRealtimeTranscription | null>(null);
@@ -97,7 +96,7 @@ const App = (): JSX.Element => {
     return new Date(timestamp).toLocaleTimeString();
   };
 
-  const combineAudioChunksLocal = (chunks: Float32Array[]): Float32Array => {
+  const combineAudioChunks = (chunks: Float32Array[]): Float32Array => {
     if (chunks.length === 0) {
       return new Float32Array(0);
     }
@@ -261,6 +260,14 @@ const App = (): JSX.Element => {
     }
   };
 
+  const transcribeSpeech = async (audioData: Float32Array) => {
+    const openaiTranscription = openaiTranscriptionRef.current;
+    const smartTurn = smartTurnRef.current;
+    if (!openaiTranscription || !smartTurn) {
+      return;
+    }
+  }
+
   const transcribeSpeechLocal = async (
     audioData: Float32Array,
     reason: "speech_end" | "timer",
@@ -269,6 +276,19 @@ const App = (): JSX.Element => {
     const smartTurn = smartTurnRef.current;
     if (!openaiTranscription || !smartTurn) {
       return;
+    }
+
+    // Debug: Save audio file to disk before transcription
+    try {
+      const filename = `audio_${reason}_${Date.now()}`;
+      const saveResult = await window.electronAPI.saveAudioFile(audioData, filename);
+      if (saveResult.success) {
+        console.log(`[DEBUG] Audio saved to: ${saveResult.path}`);
+      } else {
+        console.warn(`[DEBUG] Failed to save audio file: ${saveResult.error}`);
+      }
+    } catch (error) {
+      console.warn(`[DEBUG] Error saving audio file:`, error);
     }
 
     if (isTranscribingRef.current) {
@@ -284,12 +304,21 @@ const App = (): JSX.Element => {
 
     isTranscribingRef.current = true;
 
-    const processOne = async (
-      data: Float32Array,
-      why: "speech_end" | "timer",
-    ): Promise<void> => {
+    const processOne = async (data: Float32Array, why: "speech_end" | "timer"): Promise<void> => {
       try {
         const resampledData = resample16to24(data);
+
+        // Debug: Save resampled audio file (24kHz version sent to OpenAI)
+        try {
+          const resampledFilename = `resampled_${why}_${Date.now()}`;
+          const saveResult = await window.electronAPI.saveAudioFile(resampledData, resampledFilename);
+          if (saveResult.success) {
+            console.log(`[DEBUG] Resampled audio saved to: ${saveResult.path}`);
+          }
+        } catch (error) {
+          console.warn(`[DEBUG] Error saving resampled audio:`, error);
+        }
+
         const transcription = await openaiTranscription.transcribe(resampledData);
         const trimmed = transcription.trim();
         if (trimmed) {
@@ -315,13 +344,9 @@ const App = (): JSX.Element => {
           }
 
           if (why === "speech_end") {
-            const combinedAudio = combineAudioChunksLocal(
-              turnDetectionBufferRef.current,
-            );
+            const combinedAudio = combineAudioChunks(turnDetectionBufferRef.current);
             const turnResult = await smartTurn.predictEndpoint(combinedAudio);
-            console.log(
-              `Turn detection (reason=${why}): prediction=${turnResult.prediction}, probability=${turnResult.probability.toFixed(3)}`,
-            );
+            console.log(`Turn detection (reason=${why}): prediction=${turnResult.prediction}, probability=${turnResult.probability.toFixed(3)}`);
             if (turnResult.prediction === 1) {
               if (
                 pendingTranscriptionRef.current.trim() &&
@@ -355,108 +380,162 @@ const App = (): JSX.Element => {
     }
   };
 
-  const processAudioChunkLocal = async (audioChunk: Float32Array) => {
+  const VAD_WINDOW_SIZE = 512;
+
+  /*
+  Audio buffer = RingBuffer(2 seconds)
+  Speech buffer = RingBuffer(Infty seconds)
+
+  On audio chunk:
+    If is_speaking, add audio chunk to speech buffer
+    Add audio chunk to audio buffer
+    Run VAD on last 512 samples of audio buffer
+
+  On speech start:
+    Set is_speaking = true
+    Set speech buffer to audio buffer
+    Start turn detector on speech buffer
+
+  On turn complete:
+    (Check if VAD agrees)
+    Transcribe speech buffer
+  */
+
+  /*
+  isSpeaking = false;
+  onSpeechStart = () => { turnDetector.start(); isSpeaking = true; };
+  onTurnComplete = () => { transcribe(); };
+  const vad = new VAD(audioSource, onSpeechStart, onSpeechEnd);
+  const turnDetector = new TurnDetector(audioSource, onTurnIncomplete, onTurnComplete);
+  vad.start();
+  */
+
+  /*
+  const vad = new VAD(audioSource);
+  const turnDetector = new TurnDetector(audioSource);
+  vad.start();
+  (async () => {
+    for await (const evt of vad) {
+      if (evt.type === 'speechstart') {
+        turnDetector.start();
+      } else if (evt.type === 'speechend') {
+        // do thing
+      }
+    }
+  })();
+  (async () => {
+    for await (const evt of turnDetector) {
+      if (evt.type === 'complete') {
+        // do thing
+      } else if (evt.type === 'incomplete') {
+        // do thing
+      }
+    }
+  })
+  */
+  // vad = VAD(audioSource);
+  // while (true) {
+  //   vadResult = await vad.process(audioSource);
+  // }
+
+  const processAudioChunk = async (audioChunk: Float32Array) => {
+    // # BUG: this runs VAD on every processAudioChunk after vad_buffer fills up initially
+    // vad_buffer.append(audio_chunk)   # vad_buffer is ring buffer of size 512
+    // if len(vad_buffer) < VAD_MIN: return
+    // result = vad(vad_buffer)
+    // if is_speaking != result.speaking:
+    //   is_speaking = result.speaking
+    // if is_speaking:
+    //   speech_buffer.append(audio_chunk)   # speech_buffer is ring buffer of size 128k (8 seconds)
+    // else if len(speech_buffer) >= TRANSCRIBE_MIN:
+    //   transcribe(speech_buffer)
     const vad = vadRef.current;
     const ringBuffer = ringBufferRef.current;
-    if (!vad || !ringBuffer) {
-      return;
-    }
+    if (!vad || !ringBuffer) return;
 
     const preChunkBufferedAudio = ringBuffer.read();
 
-    try {
-      const windowSize = 512;
-      for (let i = 0; i < audioChunk.length; i += windowSize) {
-        const chunk = audioChunk.slice(i, Math.min(i + windowSize, audioChunk.length));
-        if (chunk.length === windowSize) {
-          await vad.predict(chunk);
-        }
+    for (let i = 0; i < audioChunk.length; i += VAD_WINDOW_SIZE) {
+      const chunk = audioChunk.slice(i, Math.min(i + VAD_WINDOW_SIZE, audioChunk.length));
+      if (chunk.length === VAD_WINDOW_SIZE) {
+        await vad.predict(chunk);
       }
+    }
 
-      const hasCurrentSpeech = vad.triggered;
+    const hasCurrentSpeech = vad.triggered;
 
-      if (hasCurrentSpeech && !speechStartedRef.current) {
-        speechStartedRef.current = true;
-        silenceCounterRef.current = 0;
-        lastUserSpeechTimeRef.current = Date.now();
-        lastTranscribedAudioLengthRef.current = 0;
+    if (hasCurrentSpeech && !speechStartedRef.current) {
+      speechStartedRef.current = true;
+      silenceCounterRef.current = 0;
+      lastUserSpeechTimeRef.current = Date.now();
+      lastTranscribedAudioLengthRef.current = 0;
 
-        currentSpeechBufferRef.current = [];
-        if (preChunkBufferedAudio.length > 0) {
-          currentSpeechBufferRef.current.push(preChunkBufferedAudio);
-        }
-        currentSpeechBufferRef.current.push(audioChunk);
-      } else if (speechStartedRef.current) {
-        currentSpeechBufferRef.current.push(audioChunk);
+      currentSpeechBufferRef.current = [];
+      if (preChunkBufferedAudio.length > 0) {
+        currentSpeechBufferRef.current.push(preChunkBufferedAudio);
+      }
+      currentSpeechBufferRef.current.push(audioChunk);
+    } else if (speechStartedRef.current) {
+      currentSpeechBufferRef.current.push(audioChunk);
 
-        // Prevent memory leak by limiting current speech buffer
-        if (currentSpeechBufferRef.current.length > MAX_AUDIO_BUFFER_CHUNKS) {
-          currentSpeechBufferRef.current.shift(); // Remove oldest chunk
-        }
-
-        if (!hasCurrentSpeech) {
-          silenceCounterRef.current += 1;
-          if (silenceCounterRef.current >= SILENCE_THRESHOLD) {
-            const currentAudio = combineAudioChunksLocal(
-              currentSpeechBufferRef.current,
-            );
-            if (
-              currentAudio.length > 0 &&
-              currentAudio.length > lastTranscribedAudioLengthRef.current
-            ) {
-              const previousLength = lastTranscribedAudioLengthRef.current;
-              const targetLength = currentAudio.length;
-              const newAudio = currentAudio.slice(previousLength);
-              if (newAudio.length >= MIN_TRANSCRIBE_SAMPLES) {
-                lastTranscribedAudioLengthRef.current = targetLength;
-                try {
-                  await transcribeSpeechLocal(newAudio, "speech_end");
-                } catch (error) {
-                  lastTranscribedAudioLengthRef.current = previousLength;
-                  throw error;
-                }
+      if (!hasCurrentSpeech) {
+        silenceCounterRef.current += 1;
+        if (silenceCounterRef.current >= SILENCE_THRESHOLD) {
+          const currentAudio = combineAudioChunks(currentSpeechBufferRef.current);
+          if (
+            currentAudio.length > 0 &&
+            currentAudio.length > lastTranscribedAudioLengthRef.current
+          ) {
+            const previousLength = lastTranscribedAudioLengthRef.current;
+            const targetLength = currentAudio.length;
+            const newAudio = currentAudio.slice(previousLength);
+            if (newAudio.length >= MIN_TRANSCRIBE_SAMPLES) {
+              lastTranscribedAudioLengthRef.current = targetLength;
+              try {
+                await transcribeSpeechLocal(newAudio, "speech_end");
+              } catch (error) {
+                lastTranscribedAudioLengthRef.current = previousLength;
+                throw error;
               }
             }
-            currentSpeechBufferRef.current = [];
-            lastTranscriptionTimeRef.current = Date.now();
-            speechStartedRef.current = false;
-            silenceCounterRef.current = 0;
           }
-        } else {
+          currentSpeechBufferRef.current = [];
+          lastTranscriptionTimeRef.current = Date.now();
+          speechStartedRef.current = false;
           silenceCounterRef.current = 0;
         }
+      } else {
+        silenceCounterRef.current = 0;
       }
-
-      const now = Date.now();
-      if (
-        now - lastTranscriptionTimeRef.current >= 5000 &&
-        currentSpeechBufferRef.current.length > 0
-      ) {
-        const currentAudio = combineAudioChunksLocal(currentSpeechBufferRef.current);
-        if (currentAudio.length > lastTranscribedAudioLengthRef.current) {
-          const previousLength = lastTranscribedAudioLengthRef.current;
-          const targetLength = currentAudio.length;
-          const newAudio = currentAudio.slice(previousLength);
-          if (newAudio.length >= MIN_TRANSCRIBE_SAMPLES) {
-            lastTranscribedAudioLengthRef.current = targetLength;
-            try {
-              await transcribeSpeechLocal(newAudio, "timer");
-            } catch (error) {
-              lastTranscribedAudioLengthRef.current = previousLength;
-              throw error;
-            }
-          }
-          lastTranscriptionTimeRef.current = now;
-        }
-      }
-
-      ringBuffer.write(audioChunk);
-    } catch (error) {
-      console.error("Error processing audio chunk:", error);
     }
+
+    const now = Date.now();
+    if (
+      now - lastTranscriptionTimeRef.current >= 5000 &&
+      currentSpeechBufferRef.current.length > 0
+    ) {
+      const currentAudio = combineAudioChunks(currentSpeechBufferRef.current);
+      if (currentAudio.length > lastTranscribedAudioLengthRef.current) {
+        const previousLength = lastTranscribedAudioLengthRef.current;
+        const targetLength = currentAudio.length;
+        const newAudio = currentAudio.slice(previousLength);
+        if (newAudio.length >= MIN_TRANSCRIBE_SAMPLES) {
+          lastTranscribedAudioLengthRef.current = targetLength;
+          try {
+            await transcribeSpeechLocal(newAudio, "timer");
+          } catch (error) {
+            lastTranscribedAudioLengthRef.current = previousLength;
+            throw error;
+          }
+        }
+        lastTranscriptionTimeRef.current = now;
+      }
+    }
+
+    ringBuffer.write(audioChunk);
   };
 
-  const initializeModelsLocal = async () => {
+  const initializeModels = async () => {
     try {
       updateStatus("loading");
       const vad = new VadIterator(`${MODELS_BASE_URL}/silero_vad.onnx`);
@@ -488,7 +567,7 @@ const App = (): JSX.Element => {
     }
   };
 
-  const createAudioProcessorBlobLocal = () => {
+  const createAudioProcessorBlob = () => {
     const processorCode = `
       class VADProcessor extends AudioWorkletProcessor {
         constructor() {
@@ -543,20 +622,17 @@ const App = (): JSX.Element => {
       });
 
       mediaStreamRef.current = stream;
-      const AudioContextCtor =
-        window.AudioContext ||
-        (window as typeof window & { webkitAudioContext?: typeof AudioContext })
-          .webkitAudioContext;
-      if (!AudioContextCtor) {
+      const AudioContext = window.AudioContext;
+      if (!AudioContext) {
         throw new Error("Web Audio API not supported in this browser");
       }
 
-      const audioContext = new AudioContextCtor({ sampleRate: 16000 });
+      const audioContext = new AudioContext({ sampleRate: 16000 });
       audioContextRef.current = audioContext;
       const source = audioContext.createMediaStreamSource(stream);
 
       if (!vadRef.current || !openaiTranscriptionRef.current) {
-        const initialized = await initializeModelsLocal();
+        const initialized = await initializeModels();
         if (!initialized) {
           stream.getTracks().forEach((track) => track.stop());
           mediaStreamRef.current = null;
@@ -565,7 +641,7 @@ const App = (): JSX.Element => {
         }
       }
 
-      const workletUrl = createAudioProcessorBlobLocal();
+      const workletUrl = createAudioProcessorBlob();
       try {
         await audioContext.audioWorklet.addModule(workletUrl);
       } finally {
@@ -573,19 +649,10 @@ const App = (): JSX.Element => {
       }
 
       const processorNode = new AudioWorkletNode(audioContext, "vad-processor");
-      processorNode.port.onmessage = async (
-        event: MessageEvent<{ audioData: number[] }>,
-      ) => {
-        const { audioData } = event.data;
-        const audioChunk = new Float32Array(audioData);
-
-        // Prevent memory leak by limiting recorded chunks
+      processorNode.port.onmessage = async (event: MessageEvent<{ audioData: number[] }>) => {
+        const audioChunk = new Float32Array(event.data.audioData);
         recordedChunksRef.current.push(audioChunk);
-        if (recordedChunksRef.current.length > MAX_AUDIO_BUFFER_CHUNKS) {
-          recordedChunksRef.current.shift(); // Remove oldest chunk
-        }
-
-        await processAudioChunkLocal(audioChunk);
+        await processAudioChunk(audioChunk);
       };
 
       const analyserNode = audioContext.createAnalyser();
@@ -621,7 +688,6 @@ const App = (): JSX.Element => {
   };
 
   const toggleRecording = async () => {
-    // Use a more robust state check that considers both ref and status
     const currentIsRecording = isRecordingRef.current || status === "recording";
     console.log(`toggleRecording called - status: ${status}, isRecording (state): ${isRecording}, isRecording (ref): ${currentIsRecording}, toggleInProgress: ${toggleInProgressRef.current}`);
 
@@ -729,6 +795,10 @@ const App = (): JSX.Element => {
     // Listen for tray toggle recording events
     const removeToggleListener = window.electronAPI?.onToggleRecording?.(toggleRecording);
 
+    // Listen for cursor position updates from main process
+    const removeCursorListener = window.electronAPI?.onCursorUpdate?.((coordinates: { x: number; y: number }) => {
+      setCursorPosition(coordinates);
+    });
 
     return () => {
       if (silenceTimeoutRef.current !== null) {
@@ -753,6 +823,11 @@ const App = (): JSX.Element => {
       if (removeToggleListener) {
         removeToggleListener();
       }
+
+      // Clean up cursor update listener
+      if (removeCursorListener) {
+        removeCursorListener();
+      }
     };
   }, []);
 
@@ -760,21 +835,11 @@ const App = (): JSX.Element => {
   return (
     <main className="relative flex min-h-screen w-full flex-col overflow-hidden font-sans leading-relaxed text-gray-800">
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <Cursor analyser={visualizerAnalyser} status={status} currentResponse={currentResponse} />
+        <Cursor analyser={visualizerAnalyser} status={status} currentResponse={currentResponse} position={cursorPosition}/>
       </div>
 
-
-      {/* Error Display - positioned at upper center */}
       {currentError && (
-        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 md:top-8 max-w-md p-4 rounded-md border border-red-300 bg-red-50 flex items-center">
-          <svg className="h-5 w-5 text-red-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-          </svg>
-          <div className="ml-3">
-            <h3 className="text-sm font-medium text-red-800">Error</h3>
-            <div className="mt-1 text-sm text-red-700">{currentError}</div>
-          </div>
-        </div>
+        <ErrorMessage error={currentError}/>
       )}
     </main>
   );

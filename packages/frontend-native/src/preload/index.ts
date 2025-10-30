@@ -48,9 +48,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('toggle-recording', callback);
   },
 
+  // Cursor position updates
+  onCursorUpdate: (callback: (coordinates: { x: number; y: number }) => void) => {
+    ipcRenderer.on('cursor-update', (_event, coordinates) => callback(coordinates));
+    return () => ipcRenderer.removeListener('cursor-update', callback);
+  },
+
   // Recording state communication
   sendRecordingState: (isRecording: boolean) => ipcRenderer.send('recording-state-changed', isRecording),
 
   // Screenshot functionality
   takeScreenshot: (): Promise<ScreenshotResult> => ipcRenderer.invoke('take-screenshot'),
+
+  // Audio debugging - save audio files to disk
+  saveAudioFile: (audioData: Float32Array, filename: string): Promise<{ success: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('save-audio-file', audioData, filename),
 });

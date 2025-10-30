@@ -39,8 +39,10 @@ interface ElectronAPI {
   keysTool: (data: KeysToolData) => Promise<ToolResult>;
   toggleRecording: () => void;
   onToggleRecording: (callback: () => void) => (() => void);
+  onCursorUpdate: (callback: (coordinates: { x: number; y: number }) => void) => (() => void);
   sendRecordingState: (isRecording: boolean) => void;
   takeScreenshot: () => Promise<ScreenshotResult>;
+  saveAudioFile: (audioData: Float32Array, filename: string) => Promise<{ success: boolean; path?: string; error?: string }>;
 }
 
 declare global {
