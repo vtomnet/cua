@@ -3,6 +3,8 @@ type ErrorMessageProps = {
 };
 
 const ErrorMessage = ({ error }: ErrorMessageProps): JSX.Element => {
+  if (!error) return <></>;
+
   return (
     <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 md:top-8 max-w-md p-4 rounded-md border border-red-300 bg-red-50 flex items-center">
       <svg className="h-5 w-5 text-red-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, IpcMainEvent, IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, IpcMainEvent, IpcMainInvokeEvent, desktopCapturer, screen } from 'electron';
 import path from 'path';
 import { writeFileSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
@@ -191,19 +191,35 @@ ipcMain.on("recording-state-changed", (_event: IpcMainEvent, recordingState: boo
 });
 
 ipcMain.handle("take-screenshot", async (_event: IpcMainInvokeEvent) => {
-  console.log("Taking screenshot via robotjs");
+  console.log("Taking screenshot via Electron desktopCapturer");
 
   try {
-    // Take screenshot using robotjs
-    const screenshot = robot.screen.capture();
+    // Get primary display info
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width: displayWidth, height: displayHeight } = primaryDisplay.size;
+    const scaleFactor = primaryDisplay.scaleFactor;
 
-    // Convert the screenshot to a native image for processing
-    const buffer = Buffer.from(screenshot.image, 'binary');
-    const originalImage = nativeImage.createFromBuffer(buffer);
+    console.log(`Display: ${displayWidth}x${displayHeight} @ ${scaleFactor}x scale`);
 
-    // Get original dimensions
-    const originalSize = originalImage.getSize();
-    console.log(`Original screenshot size: ${originalSize.width}x${originalSize.height}`);
+    // Use desktopCapturer to get screen sources
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: {
+        width: displayWidth * scaleFactor,
+        height: displayHeight * scaleFactor
+      }
+    });
+
+    if (sources.length === 0) {
+      throw new Error('No screen sources found. Screen Recording permission may not be granted.');
+    }
+
+    // Use the first screen source (primary display)
+    const primarySource = sources[0];
+    const thumbnail = primarySource.thumbnail;
+    const originalSize = thumbnail.getSize();
+
+    console.log(`Captured screenshot: ${originalSize.width}x${originalSize.height}`);
 
     // Calculate new dimensions to fit within 1024px max dimension while maintaining aspect ratio
     const maxDimension = 1024;
@@ -224,18 +240,25 @@ ipcMain.handle("take-screenshot", async (_event: IpcMainInvokeEvent) => {
       }
     }
 
-    console.log(`Resized screenshot to: ${newWidth}x${newHeight}`);
+    console.log(`Resizing screenshot to: ${newWidth}x${newHeight}`);
 
     // Resize the image
-    const resizedImage = originalImage.resize({
+    const resizedImage = thumbnail.resize({
       width: newWidth,
       height: newHeight,
       quality: 'good'
     });
 
-    // Convert resized image to base64
-    const resizedBuffer = resizedImage.toPNG();
+    // Convert to JPEG with quality compression (much smaller than PNG)
+    // Quality 70 provides a good balance between file size and visual quality
+    const resizedBuffer = resizedImage.toJPEG(70);
     const base64Image = resizedBuffer.toString('base64');
+
+    // Log file sizes for debugging
+    const originalPngSize = thumbnail.toPNG().length;
+    const compressedSize = resizedBuffer.length;
+    console.log(`Original PNG size: ${(originalPngSize / 1024).toFixed(2)} KB`);
+    console.log(`Compressed JPEG size: ${(compressedSize / 1024).toFixed(2)} KB (${((compressedSize / originalPngSize) * 100).toFixed(1)}% of original)`);
 
     return {
       success: true,
@@ -247,9 +270,11 @@ ipcMain.handle("take-screenshot", async (_event: IpcMainInvokeEvent) => {
     };
   } catch (error) {
     console.error("Error taking screenshot:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+    console.error("Make sure Screen Recording permission is granted in System Settings > Privacy & Security > Screen Recording");
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error occurred"
+      error: errorMessage
     };
   }
 });

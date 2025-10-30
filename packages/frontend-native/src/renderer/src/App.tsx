@@ -6,6 +6,7 @@ import ErrorMessage from "./components/ErrorMessage";
 import { VAD } from "./vad";
 import { transcribe, disconnectTranscription } from "./transcribe";
 import vadModelUrl from "../../assets/silero_vad.onnx?url";
+import { sendToLLM } from "./llm";
 
 type AppStatus = "idle" | "loading" | "recording" | "error";
 
@@ -41,11 +42,13 @@ const App = (): JSX.Element => {
     console.log("Speech started");
     isSpeakingRef.current = true;
 
-    // Clear the speech buffer to start fresh
-    // if (speechBufferRef.current) {
-    //   speechBufferRef.current.read(); // Read to clear
-    // }
-    // TODO: Turn detection
+    // Copy the previous 2 seconds from audioBuffer to speechBuffer
+    // This ensures we capture the beginning of speech that occurred before VAD detection
+    if (audioBufferRef.current && speechBufferRef.current) {
+      const previousAudio = audioBufferRef.current.read();
+      speechBufferRef.current.write(previousAudio);
+      console.log(`Prepended ${previousAudio.length} samples (${(previousAudio.length / 16000).toFixed(2)}s) from ring buffer`);
+    }
   };
 
   const speechEnd = async () => {
@@ -61,7 +64,13 @@ const App = (): JSX.Element => {
         const transcript = await transcribe(audioData);
         console.log("Transcript:", transcript);
 
-        // TODO: Handle transcript (send to LLM, etc.)
+        // Send transcript to LLM
+        if (transcript.trim()) {
+          await sendToLLM(transcript);
+        }
+
+        // Clear the speech buffer after processing
+        speechBufferRef.current.clear();
       } catch (error) {
         console.error("Transcription failed:", error);
       }

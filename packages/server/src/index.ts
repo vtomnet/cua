@@ -66,13 +66,17 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static("public"));
 
 app.post("/generate", async (req, res) => {
   try {
     const { text, image } = req.body ?? {};
-    console.log(req.body);
+
+    // Log request size for diagnostics
+    const requestSize = JSON.stringify(req.body).length;
+    const imageSizeKB = image ? (image.length * 0.75 / 1024).toFixed(2) : 0;
+    console.log(`Request received - Total size: ${(requestSize / 1024).toFixed(2)}KB, Image size: ${imageSizeKB}KB`);
 
     if (typeof text !== "string") {
       return res.status(400).json({ error: "text must be a string" });
@@ -93,8 +97,8 @@ app.post("/generate", async (req, res) => {
         return res.status(400).json({ error: "image must be a base64 string" });
       }
 
-      // Determine image type from base64 string or assume PNG
-      let mimeType = "image/png";
+      // Determine image type from base64 string or assume JPEG (default format)
+      let mimeType = "image/jpeg";
       if (image.startsWith("data:")) {
         const matches = image.match(/^data:([^;]+);base64,/);
         if (matches) {
@@ -127,7 +131,14 @@ app.post("/generate", async (req, res) => {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to generate completion";
-    console.error("Error generating completion", error);
+    console.error("Error generating completion:", error);
+
+    // Log additional error details for diagnostics
+    if (error instanceof Error) {
+      console.error("Error name:", error.name);
+      console.error("Error stack:", error.stack);
+    }
+
     res.status(500).json({ error: message });
   }
 });

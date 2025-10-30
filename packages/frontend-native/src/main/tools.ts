@@ -107,32 +107,72 @@ export async function scrollTool(data: ScrollToolData): Promise<ToolResult> {
 
 export async function clickTool(data: ClickToolData): Promise<ToolResult> {
   try {
-    const { x, y } = data;
+    const { x: normX, y: normY } = data;
 
     // Validate coordinates
-    if (typeof x !== 'number' || typeof y !== 'number') {
+    if (typeof normX !== 'number' || typeof normY !== 'number') {
       return {
         success: false,
         output: "Invalid coordinates: x and y must be numbers"
       };
     }
 
-    if (x < 0 || y < 0) {
+    if (normX < 0 || normY < 0) {
       return {
         success: false,
         output: "Invalid coordinates: x and y must be positive"
       };
     }
 
-    console.log(`Clicking at coordinates (${x}, ${y})`);
+    console.log(`Normalized coordinates: (${normX}, ${normY})`);
 
-    // Move mouse to position and click
-    robot.moveMouse(x, y);
+    const screenSize = robot.getScreenSize();
+    const screenWidth = screenSize.width;
+    const screenHeight = screenSize.height;
+
+    console.log(`Screen size: ${screenWidth}x${screenHeight}`);
+
+    const maxDimension = 1024;
+    let normWidth: number, normHeight: number;
+
+    if (screenWidth > screenHeight) {
+      normWidth = maxDimension;
+      normHeight = Math.round(maxDimension / (screenWidth / screenHeight));
+    } else {
+      normHeight = maxDimension;
+      normWidth = Math.round(maxDimension * (screenWidth / screenHeight));
+    }
+
+    console.log(`Normalized dimensions: ${normWidth}x${normHeight}`);
+
+    const x = Math.round((normX / normWidth) * screenWidth);
+    const y = Math.round((normY / normHeight) * screenHeight);
+
+    // Clamp coordinates to screen bounds
+    const clampedX = Math.max(0, Math.min(x, screenWidth - 1));
+    const clampedY = Math.max(0, Math.min(y, screenHeight - 1));
+
+    console.log(`Denormalized coordinates: (${x}, ${y}), clamped: (${clampedX}, ${clampedY})`);
+
+    // Set mouse delay for more reliable movement
+    robot.setMouseDelay(2);
+
+    // Move mouse to position
+    robot.moveMouse(clampedX, clampedY);
+
+    // Small delay to ensure mouse has moved before clicking
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Verify mouse position
+    const mousePos = robot.getMousePos();
+    console.log(`Mouse position after move: (${mousePos.x}, ${mousePos.y})`);
+
+    // Perform the click
     robot.mouseClick();
 
     return {
       success: true,
-      output: `Clicked at coordinates (${x}, ${y})`
+      output: `Clicked at screen coordinates (${clampedX}, ${clampedY}) [normalized: (${normX}, ${normY})]`
     };
   } catch (error) {
     console.error("Error clicking:", error);
