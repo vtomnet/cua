@@ -6,7 +6,7 @@ import ErrorMessage from "./components/ErrorMessage";
 import { VAD } from "./vad";
 import { transcribe, disconnectTranscription } from "./transcribe";
 import vadModelUrl from "../../assets/silero_vad.onnx?url";
-import { sendToLLM } from "./llm";
+import { runAgent } from "./llm";
 
 type AppStatus = "idle" | "loading" | "recording" | "error";
 
@@ -55,7 +55,6 @@ const App = (): JSX.Element => {
     console.log("Speech ended");
     isSpeakingRef.current = false;
 
-    // Transcribe the speech buffer
     if (speechBufferRef.current) {
       try {
         const audioData = speechBufferRef.current.read();
@@ -64,12 +63,10 @@ const App = (): JSX.Element => {
         const transcript = await transcribe(audioData);
         console.log("Transcript:", transcript);
 
-        // Send transcript to LLM
         if (transcript.trim()) {
-          await sendToLLM(transcript);
+          await runAgent(transcript);
         }
 
-        // Clear the speech buffer after processing
         speechBufferRef.current.clear();
       } catch (error) {
         console.error("Transcription failed:", error);

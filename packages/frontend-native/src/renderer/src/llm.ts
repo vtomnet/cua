@@ -1,5 +1,10 @@
+interface Message {
+  role: "user" | "assistant" | "tool";
+  content: string | Array<any>;
+}
+
 interface LLMRequest {
-  text: string;
+  messages: Array<Message>;
   image?: string;
 }
 
@@ -9,116 +14,138 @@ interface ToolCall {
 }
 
 interface LLMResponse {
-  text?: string;
-  toolCalls?: ToolCall[];
+  messages: Message[];
+  finishReason: string;
+}
+
+interface ToolCallPart {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  input: any;
+}
+
+interface ToolResultPart {
+  type: 'tool-result';
+  toolCallId: string;
+  output: {
+    type: 'text';
+    value: string;
+  };
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
-export const sendToLLM = async (transcription: string) => {
-  if (!transcription.trim()) {
+const generate = async (requestBody: LLMRequest): Promise<LLMResponse> => {
+  const response = await fetch(`${API_BASE_URL}/generate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+const tools: Record<string, (input: any) => Promise<string>> = {
+  open: async (input: { thing: string }) => {
+    const result = await window.electronAPI.openTool(input);
+    return result.output;
+  },
+  scroll: async (input: { direction?: "up" | "down" | "left" | "right"; distance?: number }) => {
+    const result = await window.electronAPI.scrollTool(input);
+    return result.output;
+  },
+  click: async (input: { x: number; y: number }) => {
+    const result = await window.electronAPI.clickTool(input);
+    return result.output;
+  },
+  keys: async (input: { list: string[] }) => {
+    const result = await window.electronAPI.keysTool(input);
+    return result.output;
+  },
+};
+
+const handleTool = async (toolPart: ToolCallPart): Promise<string> => {
+  const tool = tools[toolPart.toolName];
+  if (!tool) {
+    throw new Error(`Unknown tool: ${toolPart.toolName}`);
+  }
+  return await tool(toolPart.input);
+};
+
+export const runAgent = async (input: string) => {
+  if (!input.trim()) {
     return;
   }
 
-  try {
-    // Take screenshot before sending to API
-    let screenshotDataUri: string | undefined;
-    try {
-      const screenshotResult = await window.electronAPI.takeScreenshot();
-      if (screenshotResult.success && screenshotResult.image) {
-        // Convert base64 to proper JPEG data URI
-        screenshotDataUri = `data:image/jpeg;base64,${screenshotResult.image}`;
+  const messages: Message[] = [{ role: "user", content: input }];
 
-        // Calculate approximate size in KB
-        const sizeKB = (screenshotResult.image.length * 0.75 / 1024).toFixed(2);
-        console.log(`Screenshot captured: ${screenshotResult.width}x${screenshotResult.height} (resized from ${screenshotResult.originalWidth}x${screenshotResult.originalHeight}), ~${sizeKB} KB`);
-      } else {
-        console.warn('Screenshot failed:', screenshotResult.error);
-      }
-    } catch (screenshotError) {
-      console.error('Error taking screenshot:', screenshotError);
-      // Continue without screenshot if it fails
+  const responseLines: string[] = [];
+
+  while (true) {
+    const requestBody: LLMRequest = { messages };
+
+    const screenshotResult = await window.electronAPI.takeScreenshot();
+    if (screenshotResult.success && screenshotResult.image) {
+      requestBody.image = `data:image/jpeg;base64,${screenshotResult.image}`;
+    } else {
+      console.warn('Screenshot failed:', screenshotResult.error);
     }
 
-    // Build request body with text and optional image
-    const requestBody: LLMRequest = {
-      text: transcription,
-    };
+    const response = await generate(requestBody);
 
-    if (screenshotDataUri) {
-      requestBody.image = screenshotDataUri;
-    }
+    const outputMessages = response.messages;
+    console.log(outputMessages);
 
-    const response = await fetch(`${API_BASE_URL}/generate`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
+    let lastPart = null;
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${response.statusText}`);
-    }
-
-    const data: LLMResponse = await response.json();
-    const responseLines: string[] = [];
-
-    // Handle the server response format
-    const text = data?.text;
-    if (typeof text === "string" && text.trim()) {
-      responseLines.push(text.trim());
-    }
-
-    // Handle tool calls from the API format
-    const toolCalls = Array.isArray(data?.toolCalls) ? data.toolCalls : [];
-    for (const call of toolCalls) {
-      console.log(call);
-      const toolName = call?.toolName ?? "unknown_tool";
-      const args = call?.input ?? {};
-      const argsStr = JSON.stringify(args);
-      responseLines.push(`Called ${toolName}(${argsStr})`);
-
-      // Execute tool calls with proper error handling
-      try {
-        let result;
-        if (toolName === "open") {
-          result = await window.electronAPI.openTool(args as { thing: string });
-        } else if (toolName === "scroll") {
-          result = await window.electronAPI.scrollTool(args as { direction?: "up" | "down" | "left" | "right"; distance?: number });
-        } else if (toolName === "click") {
-          result = await window.electronAPI.clickTool(args as { x: number; y: number });
-        } else if (toolName === "keys") {
-          result = await window.electronAPI.keysTool(args as { list: string[] });
+    for (const message of outputMessages) {
+      responseLines.push(JSON.stringify(message));
+      messages.push(message);
+      for (const part of message.content) {
+        if (part.type === 'tool-call') {
+          const output = await handleTool(part);
+          responseLines.push(output);
+          messages.push({
+            role: 'tool',
+            content: [{
+              type: 'tool-result',
+              toolName: part.toolName,
+              toolCallId: part.toolCallId,
+              output: {
+                type: 'text',
+                value: output,
+              },
+            }]
+          })
+        } else if (part.type === 'text') {
+          console.log(part.text);
         } else {
-          console.warn(`Unknown tool: ${toolName}`);
-          continue;
+          console.warn(`Unknown part type: ${part.type}`);
         }
-
-        console.log(`Result from ${toolName}:`, result);
-
-        // Add result info to response if tool execution failed
-        if (result && !result.success) {
-          responseLines.push(`${toolName} failed: ${result.output || 'Unknown error'}`);
-        }
-      } catch (toolError) {
-        console.error(`Error executing tool ${toolName}:`, toolError);
-        responseLines.push(`${toolName} error: ${toolError instanceof Error ? toolError.message : 'Unknown error'}`);
+        lastPart = part;
       }
     }
 
-    // Fallback if no content
-    if (!responseLines.length) {
-      if (data) {
-        responseLines.push(JSON.stringify(data));
-      } else {
-        responseLines.push("No response received");
-      }
-    }
+    // timeout for actions to finish happening
+    await new Promise(r => setTimeout(r, 1000));
 
-    const responseText = responseLines.join("\n");
-    console.log("LLM Response:", responseText);
-  } catch (error) {
-    console.error("Error getting LLM response:", error);
+    if (lastPart === null || lastPart.type !== 'tool-call') {
+      break;
+    }
   }
+
+  if (!responseLines.length) {
+    responseLines.push("No response received");
+  }
+
+  const responseText = responseLines.join("\n");
+  console.log("LLM Response:", responseText);
+  return responseText;
 };

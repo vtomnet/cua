@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.38",
+    "@ai-sdk/google": "^2.0.25",
     "@cerebras/cerebras_cloud_sdk": "^1.50.0",
     "ai": "^5.0.81",
     "core": "workspace:*",

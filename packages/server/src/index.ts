@@ -2,13 +2,30 @@ import express from "express";
 import * as http from "http";
 import dotenv from "dotenv";
 // import Cerebras from "@cerebras/cerebras_cloud_sdk";
-import { generateText, tool } from "ai";
+import { generateText, tool, type ModelMessage } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
+import { google } from "@ai-sdk/google";
 import { z } from "zod";
 
 dotenv.config({ path: "../../.env" });
 
 // const client = new Cerebras();
+
+const SYSTEM_PROMPT = `
+You are a helpful computer-use assistant.
+
+## RULES
+
+- You MUST NOT ask the user questions or prompt them for interaction. If you are unsure of something, take your best guess.
+- Some tasks the user gives you will take several steps to do. Don't be discouraged; take your time with these.
+- Be as concise as possible. The user will not be reading any of your text output.
+
+## INFO
+
+The current date and time is ${new Date().toLocaleString()}.
+The user is using macOS 26 Tahoe on a MacBook Pro.
+The user's location is roughly Merced, CA.
+`;
 
 const tools = {
   open: tool({
@@ -31,12 +48,12 @@ const tools = {
       y: z.number().int().min(0)
     }),
   }),
-  keys: tool({
-    description: 'Send a list of keypresses. You can use <ctrl>, <shift>, etc. E.g., "<cmd>+c". You may also pass a string of characters to type it, like "Hello world".',
-    inputSchema: z.object({
-      list: z.array(z.string()),
-    }),
-  }),
+  // keys: tool({
+  //   description: 'Send a list of keypresses. You can use <ctrl>, <shift>, etc. E.g., "<cmd>+c". You may also pass a string of characters to type it, like "Hello world".',
+  //   inputSchema: z.object({
+  //     list: z.array(z.string()),
+  //   }),
+  // }),
 }
 
 const app = express();
@@ -71,73 +88,40 @@ app.use(express.static("public"));
 
 app.post("/generate", async (req, res) => {
   try {
-    const { text, image } = req.body ?? {};
+    const { messages: inputMessages, image } = req.body ?? {};
 
     // Log request size for diagnostics
     const requestSize = JSON.stringify(req.body).length;
     const imageSizeKB = image ? (image.length * 0.75 / 1024).toFixed(2) : 0;
     console.log(`Request received - Total size: ${(requestSize / 1024).toFixed(2)}KB, Image size: ${imageSizeKB}KB`);
 
-    if (typeof text !== "string") {
-      return res.status(400).json({ error: "text must be a string" });
-    }
-
-    // Build messages array with text and optional image
-    const userContent: Array<{ type: "text"; text: string } | { type: "image"; image: string }> = [];
-
-    // Add text content
-    userContent.push({
-      type: "text",
-      text: text,
-    });
-
-    // Add image content if provided
-    if (image) {
-      if (typeof image !== "string") {
-        return res.status(400).json({ error: "image must be a base64 string" });
-      }
-
-      // Determine image type from base64 string or assume JPEG (default format)
-      let mimeType = "image/jpeg";
-      if (image.startsWith("data:")) {
-        const matches = image.match(/^data:([^;]+);base64,/);
-        if (matches) {
-          mimeType = matches[1];
-        }
-      }
-
-      userContent.push({
+    const messages: ModelMessage[] = [];
+    if (image) messages.push({
+      role: "user",
+      content: [{
         type: "image",
-        image: image.startsWith("data:") ? image : `data:${mimeType};base64,${image}`,
-      });
-    }
+        image: image,
+      }],
+    });
+    messages.push(...inputMessages);
 
-    const messages = [{
-      role: "user" as const,
-      content: userContent,
-    }];
+    console.log(`Sending messages:`, messages);
 
     const result = await generateText({
       model: anthropic("claude-sonnet-4-5"),
+      system: SYSTEM_PROMPT,
       messages: messages,
       tools: tools,
     });
 
     res.json({
-      text: result.text,
-      toolCalls: result.toolCalls,
+      messages: result.response.messages,
       usage: result.usage,
+      finishReason: result.finishReason,
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to generate completion";
+    const message = (error as Error).message || "Failed to generate completion";
     console.error("Error generating completion:", error);
-
-    // Log additional error details for diagnostics
-    if (error instanceof Error) {
-      console.error("Error name:", error.name);
-      console.error("Error stack:", error.stack);
-    }
 
     res.status(500).json({ error: message });
   }
