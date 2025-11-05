@@ -1,13 +1,11 @@
 import { useEffect } from "react";
-import "./app.css";
 import Cursor from "./components/Cursor";
 import ErrorMessage from "./components/ErrorMessage";
 import { useRecorder } from "./record";
 import { transcribe, disconnectTranscription } from "./transcribe";
-import { runAgent } from "./llm";
+import { runAgent, AgentCancelledError } from "./llm";
 
 const App = (): JSX.Element => {
-  // Define callbacks for speech events
   const handleSpeechEnd = async (audioData: Float32Array) => {
     try {
       console.log(`Transcribing ${audioData.length} samples (${(audioData.length / 16000).toFixed(2)}s)`);
@@ -16,7 +14,15 @@ const App = (): JSX.Element => {
       console.log("Transcript:", transcript);
 
       if (transcript.trim()) {
-        await runAgent(transcript);
+        try {
+          await runAgent(transcript);
+        } catch (error) {
+          if (error instanceof AgentCancelledError) {
+            console.warn("Agent execution was cancelled by a new invocation");
+          } else {
+            throw error; // Re-throw other errors to outer catch
+          }
+        }
       }
     } catch (error) {
       console.error("Transcription failed:", error);
@@ -43,6 +49,28 @@ const App = (): JSX.Element => {
     return () => {
       disconnectTranscription();
     };
+  }, []);
+
+  // Handle text processing from control panel
+  useEffect(() => {
+    if (!window.electronAPI?.onProcessText) return;
+
+    const cleanup = window.electronAPI.onProcessText(async (text: string) => {
+      console.log("Processing text from control panel:", text);
+      if (text.trim()) {
+        try {
+          await runAgent(text);
+        } catch (error) {
+          if (error instanceof AgentCancelledError) {
+            console.warn("Agent execution was cancelled by a new invocation");
+          } else {
+            console.error("Agent execution failed:", error);
+          }
+        }
+      }
+    });
+
+    return cleanup;
   }, []);
 
   return (

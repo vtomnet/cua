@@ -43,6 +43,10 @@ export default defineConfig({
         transformMixedEsModules: true,
       },
       rollupOptions: {
+        input: {
+          index: path.resolve(__dirname, 'src/renderer/index.html'),
+          control: path.resolve(__dirname, 'src/renderer/control.html'),
+        },
         external: ['onnxruntime-web'],
         output: {
           assetFileNames: (assetInfo) => {

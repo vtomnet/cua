@@ -43,6 +43,10 @@ interface ElectronAPI {
   sendRecordingState: (isRecording: boolean) => void;
   takeScreenshot: () => Promise<ScreenshotResult>;
   saveAudioFile: (audioData: Float32Array, filename: string) => Promise<{ success: boolean; path?: string; error?: string }>;
+  submitText: (text: string) => Promise<{ success: boolean }>;
+  resizeControlWindow: (showSettings: boolean) => Promise<{ success: boolean }>;
+  onProcessText: (callback: (text: string) => void) => (() => void);
+  onRecordingStateUpdate: (callback: (isRecording: boolean) => void) => (() => void);
 }
 
 declare global {

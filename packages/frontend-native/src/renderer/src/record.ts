@@ -78,6 +78,7 @@ export function useRecorder(
   const [status, setStatus] = useState<RecorderStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
 
   // Merge config with defaults
   const fullConfig = { ...DEFAULT_CONFIG, ...config };
@@ -112,6 +113,9 @@ export function useRecorder(
    * Process incoming audio chunks
    */
   const processAudioChunk = (chunk: Float32Array) => {
+    // Don't process audio when muted
+    if (isMuted) return;
+
     // Write to continuous audio buffer (for context preservation)
     if (audioBufferRef.current) {
       audioBufferRef.current.write(chunk);
@@ -338,6 +342,32 @@ export function useRecorder(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty deps - only run once on mount
+
+  // Handle toggle recording from main process
+  useEffect(() => {
+    if (!window.electronAPI?.onToggleRecording) return;
+
+    const cleanup = window.electronAPI.onToggleRecording(() => {
+      setIsMuted(prev => {
+        const newMuted = !prev;
+        console.log(`Recording ${newMuted ? 'muted' : 'unmuted'}`);
+
+        // Notify main process of the state change
+        window.electronAPI.sendRecordingState(!newMuted);
+
+        return newMuted;
+      });
+    });
+
+    return cleanup;
+  }, []);
+
+  // Send initial recording state on mount
+  useEffect(() => {
+    if (status === 'recording' && window.electronAPI?.sendRecordingState) {
+      window.electronAPI.sendRecordingState(!isMuted);
+    }
+  }, [status, isMuted]);
 
   return {
     status,

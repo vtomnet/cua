@@ -50,8 +50,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Cursor position updates
   onCursorUpdate: (callback: (coordinates: { x: number; y: number }) => void) => {
-    ipcRenderer.on('cursor-update', (_event, coordinates) => callback(coordinates));
-    return () => ipcRenderer.removeListener('cursor-update', callback);
+    const listener = (_event: any, coordinates: { x: number; y: number }) => callback(coordinates);
+    ipcRenderer.on('cursor-update', listener);
+    return () => ipcRenderer.removeListener('cursor-update', listener);
   },
 
   // Recording state communication
@@ -63,4 +64,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Audio debugging - save audio files to disk
   saveAudioFile: (audioData: Float32Array, filename: string): Promise<{ success: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke('save-audio-file', audioData, filename),
+
+  // Text submission from control panel
+  submitText: (text: string): Promise<{ success: boolean }> => ipcRenderer.invoke('submit-text', text),
+
+  // Resize control window
+  resizeControlWindow: (showSettings: boolean): Promise<{ success: boolean }> => ipcRenderer.invoke('resize-control-window', showSettings),
+
+  // Process text from control panel
+  onProcessText: (callback: (text: string) => void) => {
+    const listener = (_event: any, text: string) => callback(text);
+    ipcRenderer.on('process-text', listener);
+    return () => ipcRenderer.removeListener('process-text', listener);
+  },
+
+  // Recording state updates
+  onRecordingStateUpdate: (callback: (isRecording: boolean) => void) => {
+    const listener = (_event: any, isRecording: boolean) => callback(isRecording);
+    ipcRenderer.on('recording-state-update', listener);
+    return () => ipcRenderer.removeListener('recording-state-update', listener);
+  },
 });

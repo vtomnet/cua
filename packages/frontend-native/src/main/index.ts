@@ -1,7 +1,5 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, IpcMainEvent, IpcMainInvokeEvent, desktopCapturer, screen } from 'electron';
 import path from 'path';
-import { writeFileSync, mkdirSync } from 'fs';
-import { homedir } from 'os';
 import robot from '@jitsi/robotjs';
 import {
   openTool,
@@ -18,6 +16,7 @@ import micSlashTrayImg from "../assets/microphone-slash-tray.png"
 
 let tray: Tray | null = null;
 let isRecording = false;
+let controlWindow: BrowserWindow | null = null;
 
 function updateTrayIcon() {
   if (!tray) return;
@@ -27,11 +26,7 @@ function updateTrayIcon() {
 
   try {
     tray.setImage(img);
-
-    const tooltip = isRecording
-      ? 'Xyzzy - Recording (click to stop)'
-      : 'Xyzzy - Click to start recording';
-    tray.setToolTip(tooltip);
+    tray.setToolTip(isRecording ? 'Click to stop recording' : 'Click to start recording');
   } catch (error) {
     console.error('Error updating tray icon:', error);
   }
@@ -49,13 +44,10 @@ function createTray() {
     // Set initial icon state
     updateTrayIcon();
 
-    // Handle left click to toggle recording
+    // Handle left click to open control window
     tray.on('click', () => {
-      console.log('Tray left-clicked - toggling recording');
-      const windows = BrowserWindow.getAllWindows();
-      if (windows.length > 0) {
-        windows[0].webContents.send('toggle-recording');
-      }
+      console.log('Tray left-clicked - opening control window');
+      createControlWindow();
     });
 
     // Handle right click to show context menu
@@ -139,6 +131,51 @@ function createWindow() {
   });
 }
 
+function createControlWindow() {
+  // Don't create if already exists
+  if (controlWindow && !controlWindow.isDestroyed()) {
+    controlWindow.focus();
+    return;
+  }
+
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+
+  const windowWidth = 400;
+  const windowHeight = 180;
+
+  // Position at bottom-center of screen
+  const x = Math.floor((screenWidth - windowWidth) / 2);
+  const y = screenHeight - windowHeight - 20; // 20px from bottom
+
+  controlWindow = new BrowserWindow({
+    width: windowWidth,
+    height: windowHeight,
+    x,
+    y,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: false,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+
+  // Load control panel HTML
+  if (process.env.VITE_DEV_SERVER_URL) {
+    controlWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/control.html`);
+  } else {
+    controlWindow.loadFile(path.join(__dirname, '../renderer/control.html'));
+  }
+
+  controlWindow.on('closed', () => {
+    controlWindow = null;
+  });
+}
+
+
 ipcMain.handle("open-tool", async (_event: IpcMainInvokeEvent, data: OpenToolData) => {
   console.log("Open tool received from renderer:", data);
 
@@ -188,18 +225,67 @@ ipcMain.on("recording-state-changed", (_event: IpcMainEvent, recordingState: boo
   console.log("Recording state changed:", recordingState);
   isRecording = recordingState;
   updateTrayIcon();
+
+  // Notify all windows of state change
+  BrowserWindow.getAllWindows().forEach(win => {
+    win.webContents.send('recording-state-update', recordingState);
+  });
+});
+
+ipcMain.on("toggle-recording", () => {
+  console.log("Toggle recording request received");
+  const overlayWindow = BrowserWindow.getAllWindows().find(win => win !== controlWindow);
+  if (overlayWindow) {
+    overlayWindow.webContents.send('toggle-recording');
+  }
+});
+
+ipcMain.handle("submit-text", async (_event: IpcMainInvokeEvent, text: string) => {
+  console.log("Text submitted from control panel:", text);
+  // Send the text to the overlay window to be processed by runAgent
+  const windows = BrowserWindow.getAllWindows();
+  const overlayWindow = windows.find(win => win !== controlWindow);
+  if (overlayWindow) {
+    overlayWindow.webContents.send('process-text', text);
+  }
+  return { success: true };
+});
+
+ipcMain.handle("resize-control-window", async (_event: IpcMainInvokeEvent, showSettings: boolean) => {
+  console.log("Resizing control window. Show settings:", showSettings);
+
+  if (!controlWindow || controlWindow.isDestroyed()) {
+    return { success: false };
+  }
+
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+
+  const windowWidth = 400;
+  const normalHeight = 180;
+  const expandedHeight = 450; // Larger height to accommodate settings
+  const newHeight = showSettings ? expandedHeight : normalHeight;
+
+  // Reposition to keep it centered horizontally and at bottom
+  const x = Math.floor((screenWidth - windowWidth) / 2);
+  const y = screenHeight - newHeight - 20; // 20px from bottom
+
+  controlWindow.setBounds({
+    x,
+    y,
+    width: windowWidth,
+    height: newHeight
+  });
+
+  return { success: true };
 });
 
 ipcMain.handle("take-screenshot", async (_event: IpcMainInvokeEvent) => {
-  console.log("Taking screenshot via Electron desktopCapturer");
-
   try {
     // Get primary display info
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width: displayWidth, height: displayHeight } = primaryDisplay.size;
     const scaleFactor = primaryDisplay.scaleFactor;
-
-    console.log(`Display: ${displayWidth}x${displayHeight} @ ${scaleFactor}x scale`);
 
     // Use desktopCapturer to get screen sources
     const sources = await desktopCapturer.getSources({
@@ -218,8 +304,6 @@ ipcMain.handle("take-screenshot", async (_event: IpcMainInvokeEvent) => {
     const primarySource = sources[0];
     const thumbnail = primarySource.thumbnail;
     const originalSize = thumbnail.getSize();
-
-    console.log(`Captured screenshot: ${originalSize.width}x${originalSize.height}`);
 
     // Calculate new dimensions to fit within 1024px max dimension while maintaining aspect ratio
     const maxDimension = 1024;
@@ -240,8 +324,6 @@ ipcMain.handle("take-screenshot", async (_event: IpcMainInvokeEvent) => {
       }
     }
 
-    console.log(`Resizing screenshot to: ${newWidth}x${newHeight}`);
-
     // Resize the image
     const resizedImage = thumbnail.resize({
       width: newWidth,
@@ -254,12 +336,6 @@ ipcMain.handle("take-screenshot", async (_event: IpcMainInvokeEvent) => {
     const resizedBuffer = resizedImage.toJPEG(70);
     const base64Image = resizedBuffer.toString('base64');
 
-    // Log file sizes for debugging
-    const originalPngSize = thumbnail.toPNG().length;
-    const compressedSize = resizedBuffer.length;
-    console.log(`Original PNG size: ${(originalPngSize / 1024).toFixed(2)} KB`);
-    console.log(`Compressed JPEG size: ${(compressedSize / 1024).toFixed(2)} KB (${((compressedSize / originalPngSize) * 100).toFixed(1)}% of original)`);
-
     return {
       success: true,
       image: base64Image,
@@ -269,96 +345,7 @@ ipcMain.handle("take-screenshot", async (_event: IpcMainInvokeEvent) => {
       originalHeight: originalSize.height
     };
   } catch (error) {
-    console.error("Error taking screenshot:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-    console.error("Make sure Screen Recording permission is granted in System Settings > Privacy & Security > Screen Recording");
-    return {
-      success: false,
-      error: errorMessage
-    };
-  }
-});
-
-// Function to convert Float32Array to WAV format
-function float32ArrayToWav(audioData: Float32Array, sampleRate: number = 16000): Buffer {
-  const length = audioData.length;
-  const arrayBuffer = new ArrayBuffer(44 + length * 2);
-  const view = new DataView(arrayBuffer);
-
-  // WAV file header
-  const writeString = (offset: number, string: string) => {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
-    }
-  };
-
-  // RIFF chunk descriptor
-  writeString(0, 'RIFF');
-  view.setUint32(4, 36 + length * 2, true); // ChunkSize
-  writeString(8, 'WAVE');
-
-  // fmt sub-chunk
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true); // Subchunk1Size
-  view.setUint16(20, 1, true); // AudioFormat (PCM)
-  view.setUint16(22, 1, true); // NumChannels (mono)
-  view.setUint32(24, sampleRate, true); // SampleRate
-  view.setUint32(28, sampleRate * 2, true); // ByteRate
-  view.setUint16(32, 2, true); // BlockAlign
-  view.setUint16(34, 16, true); // BitsPerSample
-
-  // data sub-chunk
-  writeString(36, 'data');
-  view.setUint32(40, length * 2, true); // Subchunk2Size
-
-  // Convert float32 samples to int16
-  let offset = 44;
-  for (let i = 0; i < length; i++) {
-    const sample = Math.max(-1, Math.min(1, audioData[i])); // Clamp to [-1, 1]
-    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-    offset += 2;
-  }
-
-  return Buffer.from(arrayBuffer);
-}
-
-ipcMain.handle("save-audio-file", async (_event: IpcMainInvokeEvent, audioData: Float32Array, filename: string) => {
-  try {
-    // Create audio debug directory in user's home folder
-    const audioDebugDir = path.join(homedir(), 'cua-audio-debug');
-
-    try {
-      mkdirSync(audioDebugDir, { recursive: true });
-    } catch (error) {
-      // Directory might already exist, that's okay
-    }
-
-    // Convert Float32Array from renderer to actual Float32Array
-    const float32Array = new Float32Array(audioData);
-
-    // Detect sample rate based on filename (resampled files are 24kHz, others are 16kHz)
-    const sampleRate = filename.includes('resampled') ? 24000 : 16000;
-
-    // Convert to WAV format
-    const wavBuffer = float32ArrayToWav(float32Array, sampleRate);
-
-    // Create full file path with timestamp if no extension provided
-    const baseName = filename.endsWith('.wav') ? filename : `${filename}.wav`;
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const finalFilename = baseName.replace('.wav', `_${timestamp}.wav`);
-    const filePath = path.join(audioDebugDir, finalFilename);
-
-    // Write the WAV file
-    writeFileSync(filePath, wavBuffer);
-
-    console.log(`Audio file saved: ${filePath} (${float32Array.length} samples, ${(float32Array.length / sampleRate).toFixed(2)}s, ${sampleRate}Hz)`);
-
-    return {
-      success: true,
-      path: filePath
-    };
-  } catch (error) {
-    console.error("Error saving audio file:", error);
+    console.error(`Error taking screenshot: ${error}\nDid you grant Screen Recording permissions?`, error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred"
