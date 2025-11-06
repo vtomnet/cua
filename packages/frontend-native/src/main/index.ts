@@ -16,14 +16,10 @@ import fs from 'fs';
 import { execSync } from 'child_process';
 import robot from '@jitsi/robotjs';
 import {
-  openTool,
-  scrollTool,
-  clickTool,
-  keysTool,
-  OpenToolData,
-  ScrollToolData,
-  ClickToolData,
-  KeysToolData
+  openFn,
+  scrollFn,
+  clickFn,
+  keysFn,
 } from "./tools";
 import micTrayImg from "../assets/microphone-tray.png";
 import micSlashTrayImg from "../assets/microphone-slash-tray.png"
@@ -247,27 +243,19 @@ async function createSandbox() {
 // FIXME: security hole: prompt injections possible via app title / webpage title / webpage url. llama-guard?
 const sandboxFns = {
   open: async (thing: string) => {
-    const result = await openTool({ thing });
-    return result.output;
+    await openFn(thing);
   },
   scroll: async (direction: string, distance: number = 70) => {
-    const result = await scrollTool({
-      direction: direction as "up" | "down" | "left" | "right",
-      distance
-    });
-    return result.output;
+    await scrollFn(direction as "up" | "down" | "left" | "right", distance);
   },
   click: async (x: number, y: number) => {
-    const result = await clickTool({ x, y });
-    return result.output;
+    await clickFn(x, y);
   },
   screenshot: async () => {
-    // Screenshot is handled separately in the agent flow
-    return "Screenshot taken";
+    return "Screenshot taken"; // TODO
   },
   keys: async (list: string[]) => {
-    const result = await keysTool({ list });
-    return result.output;
+    await keysFn(list);
   },
 };
 
@@ -289,7 +277,7 @@ async function runSandboxed(code: string, timeoutMs = 60_000) {
 
   // Capture console messages from the sandbox
   win.webContents.on('console-message', (event, level, message, line, sourceId) => {
-    console.log(`[sandbox] [level:${level}, line:${line}] ${message}`)
+    console.log(`[sandbox] [level:${level}, line:${line}] ${message}`);
   });
 
   const src = `
@@ -300,7 +288,7 @@ async function runSandboxed(code: string, timeoutMs = 60_000) {
       function scroll(direction, distance = 70) { return window.sandboxApi.call('scroll', [direction, distance]); }
       function click(x, y) { return window.sandboxApi.call('click', [x, y]); }
       function screenshot() { return window.sandboxApi.call('screenshot', []); }
-      function keys(list) { return window.sandboxApi.call('keys', list); }
+      function keys(list) { return window.sandboxApi.call('keys', [list]); }
 
       ${code}
     })();
@@ -337,50 +325,50 @@ ipcMain.handle("execute-javascript", async (_event: IpcMainInvokeEvent, code: st
   }
 });
 
-ipcMain.handle("open-tool", async (_event: IpcMainInvokeEvent, data: OpenToolData) => {
-  console.log("Open tool received from renderer:", data);
+// ipcMain.handle("open-tool", async (_event: IpcMainInvokeEvent, data: OpenToolData) => {
+//   console.log("Open tool received from renderer:", data);
 
-  const result = await openTool(data);
-  return result;
-});
+//   const result = await openFn(data);
+//   return result;
+// });
 
-ipcMain.handle("scroll-tool", async (event: IpcMainInvokeEvent, data: ScrollToolData) => {
-  console.log("Scroll tool received from renderer:", data);
+// ipcMain.handle("scroll-tool", async (event: IpcMainInvokeEvent, data: ScrollToolData) => {
+//   console.log("Scroll tool received from renderer:", data);
 
-  // Calculate center coordinates for cursor positioning (same logic as in scrollTool)
-  const screenSize = robot.getScreenSize();
-  const centerX = Math.floor(screenSize.width / 2);
-  const centerY = Math.floor(screenSize.height / 2);
+//   // Calculate center coordinates for cursor positioning (same logic as in scrollTool)
+//   const screenSize = robot.getScreenSize();
+//   const centerX = Math.floor(screenSize.width / 2);
+//   const centerY = Math.floor(screenSize.height / 2);
 
-  // Send cursor position update to renderer before executing the scroll
-  const windows = BrowserWindow.getAllWindows();
-  if (windows.length > 0) {
-    windows[0].webContents.send('cursor-update', { x: centerX, y: centerY });
-  }
+//   // Send cursor position update to renderer before executing the scroll
+//   const windows = BrowserWindow.getAllWindows();
+//   if (windows.length > 0) {
+//     windows[0].webContents.send('cursor-update', { x: centerX, y: centerY });
+//   }
 
-  const result = await scrollTool(data);
-  return result;
-});
+//   const result = await scrollFn(data);
+//   return result;
+// });
 
-ipcMain.handle("click-tool", async (event: IpcMainInvokeEvent, data: ClickToolData) => {
-  console.log("Click tool received from renderer:", data);
+// ipcMain.handle("click-tool", async (event: IpcMainInvokeEvent, data: ClickToolData) => {
+//   console.log("Click tool received from renderer:", data);
 
-  // Send cursor position update to renderer before executing the click
-  const windows = BrowserWindow.getAllWindows();
-  if (windows.length > 0) {
-    windows[0].webContents.send('cursor-update', { x: data.x, y: data.y });
-  }
+//   // Send cursor position update to renderer before executing the click
+//   const windows = BrowserWindow.getAllWindows();
+//   if (windows.length > 0) {
+//     windows[0].webContents.send('cursor-update', { x: data.x, y: data.y });
+//   }
 
-  const result = await clickTool(data);
-  return result;
-});
+//   const result = await clickTool(data);
+//   return result;
+// });
 
-ipcMain.handle("keys-tool", async (_event: IpcMainInvokeEvent, data: KeysToolData) => {
-  console.log("Keys tool received from renderer:", data);
+// ipcMain.handle("keys-tool", async (_event: IpcMainInvokeEvent, data: KeysToolData) => {
+//   console.log("Keys tool received from renderer:", data);
 
-  const result = await keysTool(data);
-  return result;
-});
+//   const result = await keysTool(data);
+//   return result;
+// });
 
 ipcMain.on("recording-state-changed", (_event: IpcMainEvent, recordingState: boolean) => {
   console.log("Recording state changed:", recordingState);
