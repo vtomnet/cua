@@ -309,17 +309,10 @@ ipcMain.handle("execute-javascript", async (_event: IpcMainInvokeEvent, code: st
 
   try {
     await runSandboxed(code);
-    return {
-      success: true,
-      message: "Code executed successfully"
-    };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     console.error('JavaScript execution error:', errorMsg);
-    return {
-      success: false,
-      error: errorMsg
-    };
+    throw new Error(`JavaScript execution failed: ${errorMsg}`);
   }
 });
 
@@ -350,14 +343,14 @@ ipcMain.handle("submit-text", async (_event: IpcMainInvokeEvent, text: string) =
   if (overlayWindow) {
     overlayWindow.webContents.send('process-text', text);
   }
-  return { success: true };
+  // Success - no return value needed
 });
 
 ipcMain.handle("resize-control-window", async (_event: IpcMainInvokeEvent, showSettings: boolean) => {
   console.log("Resizing control window. Show settings:", showSettings);
 
   if (!controlWindow || controlWindow.isDestroyed()) {
-    return { success: false };
+    throw new Error("Control window is not available");
   }
 
   const windowWidth = 400;
@@ -375,8 +368,6 @@ ipcMain.handle("resize-control-window", async (_event: IpcMainInvokeEvent, showS
     width: windowWidth,
     height: newHeight
   });
-
-  return { success: true };
 });
 
 ipcMain.handle("get-setting", async (_event: IpcMainInvokeEvent, key: string) => {
@@ -395,9 +386,9 @@ ipcMain.handle("get-initial-recording-state", async (_event: IpcMainInvokeEvent)
   return settings.recordOnLaunch !== false; // Default to true
 });
 
-ipcMain.handle("take-screenshot", async (_event: IpcMainInvokeEvent) => { await takeScreenshot(); });
+ipcMain.handle("take-screenshot", takeScreenshot);
 
-ipcMain.handle("get-current-app", async (_event: IpcMainInvokeEvent) => { await getCurrentApp(); });
+ipcMain.handle("get-current-app", getCurrentApp);
 
 app.whenReady().then(() => {
   createTray();

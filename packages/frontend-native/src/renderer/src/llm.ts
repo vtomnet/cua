@@ -116,11 +116,11 @@ export const runAgent = async (input: string, info: SystemInfo) => {
       }
       const requestBody: LLMRequest = { messages, info: formattedInfo };
 
-      // const screenshotResult = await window.electronAPI.takeScreenshot();
-      // if (screenshotResult.success && screenshotResult.image) {
+      // try {
+      //   const screenshotResult = await window.electronAPI.takeScreenshot();
       //   requestBody.image = `data:image/jpeg;base64,${screenshotResult.image}`;
-      // } else {
-      //   console.warn('Screenshot failed:', screenshotResult.error);
+      // } catch (error) {
+      //   console.warn('Screenshot failed:', error);
       // }
 
       console.log("Calling generate with requestBody:", requestBody);

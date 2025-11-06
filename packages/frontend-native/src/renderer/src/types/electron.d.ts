@@ -1,23 +1,15 @@
 interface ScreenshotResult {
-  success: boolean;
-  image?: string; // base64 encoded image
-  width?: number;
-  height?: number;
-  originalWidth?: number;
-  originalHeight?: number;
-  error?: string;
+  image: string; // base64 encoded image
+  width: number;
+  height: number;
+  originalWidth: number;
+  originalHeight: number;
 }
 
 interface CurrentAppInfo {
   name: string;
   url?: string;
   title?: string;
-}
-
-interface JavaScriptExecutionResult {
-  success: boolean;
-  message?: string;
-  error?: string;
 }
 
 interface ElectronAPI {
@@ -27,16 +19,15 @@ interface ElectronAPI {
   onCursorUpdate: (callback: (coordinates: { x: number; y: number }) => void) => (() => void);
   sendRecordingState: (isRecording: boolean) => void;
   takeScreenshot: () => Promise<ScreenshotResult>;
-  saveAudioFile: (audioData: Float32Array, filename: string) => Promise<{ success: boolean; path?: string; error?: string }>;
-  submitText: (text: string) => Promise<{ success: boolean }>;
-  resizeControlWindow: (showSettings: boolean) => Promise<{ success: boolean }>;
+  submitText: (text: string) => Promise<void>;
+  resizeControlWindow: (showSettings: boolean) => Promise<void>;
   onProcessText: (callback: (text: string) => void) => (() => void);
   onRecordingStateUpdate: (callback: (isRecording: boolean) => void) => (() => void);
   getSetting: (key: string) => Promise<any>;
   setSetting: (key: string, value: any) => Promise<void>;
   getInitialRecordingState: () => Promise<boolean>;
   getCurrentApp: () => Promise<CurrentAppInfo>;
-  executeJavaScript: (code: string) => Promise<JavaScriptExecutionResult>;
+  executeJavaScript: (code: string) => Promise<void>;
 }
 
 declare global {

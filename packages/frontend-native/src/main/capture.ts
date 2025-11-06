@@ -8,72 +8,63 @@ interface CurrentAppInfo {
 }
 
 export async function takeScreenshot() {
-  try {
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { width: displayWidth, height: displayHeight } = primaryDisplay.size;
-    const scaleFactor = primaryDisplay.scaleFactor;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: displayWidth, height: displayHeight } = primaryDisplay.size;
+  const scaleFactor = primaryDisplay.scaleFactor;
 
-    const sources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: {
-        width: displayWidth * scaleFactor,
-        height: displayHeight * scaleFactor
-      }
-    });
-
-    if (sources.length === 0) {
-      throw new Error('No screen sources found. Screen Recording permission may not be granted.');
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: {
+      width: displayWidth * scaleFactor,
+      height: displayHeight * scaleFactor
     }
+  });
 
-    const primarySource = sources[0];
-    const thumbnail = primarySource.thumbnail;
-    const originalSize = thumbnail.getSize();
-
-    const maxDimension = 1024;
-    let newWidth = originalSize.width;
-    let newHeight = originalSize.height;
-
-    if (originalSize.width > maxDimension || originalSize.height > maxDimension) {
-      const aspectRatio = originalSize.width / originalSize.height;
-
-      if (originalSize.width > originalSize.height) {
-        // Landscape: limit width
-        newWidth = maxDimension;
-        newHeight = Math.round(maxDimension / aspectRatio);
-      } else {
-        // Portrait: limit height
-        newHeight = maxDimension;
-        newWidth = Math.round(maxDimension * aspectRatio);
-      }
-    }
-
-    // Resize the image
-    const resizedImage = thumbnail.resize({
-      width: newWidth,
-      height: newHeight,
-      quality: 'good'
-    });
-
-    // Convert to JPEG with quality compression (much smaller than PNG)
-    // Quality 70 provides a good balance between file size and visual quality
-    const resizedBuffer = resizedImage.toJPEG(70);
-    const base64Image = resizedBuffer.toString('base64');
-
-    return {
-      success: true,
-      image: base64Image,
-      width: newWidth,
-      height: newHeight,
-      originalWidth: originalSize.width,
-      originalHeight: originalSize.height
-    };
-  } catch (error) {
-    console.error(`Error taking screenshot: ${error}\nDid you grant Screen Recording permissions?`, error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error occurred"
-    };
+  if (sources.length === 0) {
+    throw new Error('No screen sources found. Screen Recording permission may not be granted.');
   }
+
+  const primarySource = sources[0];
+  const thumbnail = primarySource.thumbnail;
+  const originalSize = thumbnail.getSize();
+
+  const maxDimension = 1024;
+  let newWidth = originalSize.width;
+  let newHeight = originalSize.height;
+
+  if (originalSize.width > maxDimension || originalSize.height > maxDimension) {
+    const aspectRatio = originalSize.width / originalSize.height;
+
+    if (originalSize.width > originalSize.height) {
+      // Landscape: limit width
+      newWidth = maxDimension;
+      newHeight = Math.round(maxDimension / aspectRatio);
+    } else {
+      // Portrait: limit height
+      newHeight = maxDimension;
+      newWidth = Math.round(maxDimension * aspectRatio);
+    }
+  }
+
+  // Resize the image
+  const resizedImage = thumbnail.resize({
+    width: newWidth,
+    height: newHeight,
+    quality: 'good'
+  });
+
+  // Convert to JPEG with quality compression (much smaller than PNG)
+  // Quality 70 provides a good balance between file size and visual quality
+  const resizedBuffer = resizedImage.toJPEG(70);
+  const base64Image = resizedBuffer.toString('base64');
+
+  return {
+    image: base64Image,
+    width: newWidth,
+    height: newHeight,
+    originalWidth: originalSize.width,
+    originalHeight: originalSize.height
+  };
 }
 
 // Helper function to get browser info on macOS

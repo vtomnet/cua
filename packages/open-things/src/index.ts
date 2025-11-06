@@ -2,20 +2,6 @@ import { execFile } from "child_process";
 
 // on macOS, use Launch Services API
 
-// need to think more about this. Perhaps presence of `error` field
-// is sufficient to replace `success` field. Is `output` needed at
-// all? In case of failure, everything should go into `error`. In
-// case of success, I'm not sure we expect any output. So `error`
-// may be the only necessary field. Although, it may be useful to
-// signal which application was opened; this aligns with Apple's
-// LaunchServices interface. Do we get that from Windows and Linux
-// as well?
-interface OpenResult {
-  success: boolean;
-  output: string;
-  error?: string;
-}
-
 interface NormalizeUrlOptions {
   /** Scheme to prepend when missing. */
   defaultScheme?: 'https' | 'http';
@@ -118,7 +104,7 @@ function normalizeOptions(opts: NormalizeUrlOptions): NormalizeUrlOptions {
   };
 }
 
-export default async function open(things: string | Array<string>): Promise<OpenResult> {
+export default async function open(things: string | Array<string>): Promise<void> {
   const thingList = Array.isArray(things) ? things : [things];
   let normalizedThings: string[] = [];
   for (const thing of thingList) {
@@ -126,12 +112,12 @@ export default async function open(things: string | Array<string>): Promise<Open
     normalizedThings.push(normalizedThing ?? thing);
   }
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     execFile("/usr/bin/open", normalizedThings, (error, stdout, stderr) => {
       if (error) {
-        resolve({ success: false, output: stdout, error: stderr || error.message });
+        reject(new Error(stderr || error.message));
       } else {
-        resolve({ success: true, output: stdout });
+        resolve();
       }
     });
   });

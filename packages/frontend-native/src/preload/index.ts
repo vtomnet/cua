@@ -1,25 +1,17 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 interface ScreenshotResult {
-  success: boolean;
-  image?: string;
-  width?: number;
-  height?: number;
-  originalWidth?: number;
-  originalHeight?: number;
-  error?: string;
+  image: string;
+  width: number;
+  height: number;
+  originalWidth: number;
+  originalHeight: number;
 }
 
 interface CurrentAppInfo {
   name: string;
   url?: string;
   title?: string;
-}
-
-interface JavaScriptExecutionResult {
-  success: boolean;
-  message?: string;
-  error?: string;
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -46,15 +38,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Screenshot functionality
   takeScreenshot: (): Promise<ScreenshotResult> => ipcRenderer.invoke('take-screenshot'),
 
-  // Audio debugging - save audio files to disk
-  saveAudioFile: (audioData: Float32Array, filename: string): Promise<{ success: boolean; path?: string; error?: string }> =>
-    ipcRenderer.invoke('save-audio-file', audioData, filename),
-
   // Text submission from control panel
-  submitText: (text: string): Promise<{ success: boolean }> => ipcRenderer.invoke('submit-text', text),
+  submitText: (text: string): Promise<void> => ipcRenderer.invoke('submit-text', text),
 
   // Resize control window
-  resizeControlWindow: (showSettings: boolean): Promise<{ success: boolean }> => ipcRenderer.invoke('resize-control-window', showSettings),
+  resizeControlWindow: (showSettings: boolean): Promise<void> => ipcRenderer.invoke('resize-control-window', showSettings),
 
   // Process text from control panel
   onProcessText: (callback: (text: string) => void) => {
@@ -79,5 +67,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCurrentApp: (): Promise<CurrentAppInfo> => ipcRenderer.invoke('get-current-app'),
 
   // Execute JavaScript code
-  executeJavaScript: (code: string): Promise<JavaScriptExecutionResult> => ipcRenderer.invoke('execute-javascript', code),
+  executeJavaScript: (code: string): Promise<void> => ipcRenderer.invoke('execute-javascript', code),
 });
