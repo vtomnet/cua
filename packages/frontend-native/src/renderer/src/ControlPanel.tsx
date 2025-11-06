@@ -10,10 +10,11 @@ const ControlPanel = (): JSX.Element => {
   // Load initial recording state from settings
   useEffect(() => {
     const loadInitialState = async () => {
-      if (window.electronAPI?.getInitialRecordingState) {
+      if (window.electronAPI?.getSetting) {
         try {
-          const shouldRecord = await window.electronAPI.getInitialRecordingState();
-          setIsRecording(shouldRecord);
+          const shouldRecord = await window.electronAPI.getSetting('recordOnLaunch');
+          // Default to true if not set
+          setIsRecording(shouldRecord !== false);
         } catch (error) {
           console.error('Error loading initial recording state:', error);
         }

@@ -11,14 +11,16 @@ const App = (): JSX.Element => {
   // Load initial recording state from settings
   useEffect(() => {
     const loadInitialState = async () => {
-      if (window.electronAPI?.getInitialRecordingState) {
+      if (window.electronAPI?.getSetting) {
         try {
-          const shouldRecord = await window.electronAPI.getInitialRecordingState();
-          setIsRecording(shouldRecord);
+          const shouldRecord = await window.electronAPI.getSetting('recordOnLaunch');
+          // Default to true if not set
+          const recordingState = shouldRecord !== false;
+          setIsRecording(recordingState);
 
           // Send initial state to main process
           if (window.electronAPI?.sendRecordingState) {
-            window.electronAPI.sendRecordingState(shouldRecord);
+            window.electronAPI.sendRecordingState(recordingState);
           }
         } catch (error) {
           console.error('Error loading initial recording state:', error);

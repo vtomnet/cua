@@ -25,7 +25,6 @@ interface ElectronAPI {
   onRecordingStateUpdate: (callback: (isRecording: boolean) => void) => (() => void);
   getSetting: (key: string) => Promise<any>;
   setSetting: (key: string, value: any) => Promise<void>;
-  getInitialRecordingState: () => Promise<boolean>;
   getCurrentApp: () => Promise<CurrentAppInfo>;
   executeJavaScript: (code: string) => Promise<void>;
 }

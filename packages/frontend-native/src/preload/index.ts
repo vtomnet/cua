@@ -61,7 +61,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Settings management
   getSetting: (key: string): Promise<any> => ipcRenderer.invoke('get-setting', key),
   setSetting: (key: string, value: any): Promise<void> => ipcRenderer.invoke('set-setting', key, value),
-  getInitialRecordingState: (): Promise<boolean> => ipcRenderer.invoke('get-initial-recording-state'),
 
   // Get current application
   getCurrentApp: (): Promise<CurrentAppInfo> => ipcRenderer.invoke('get-current-app'),

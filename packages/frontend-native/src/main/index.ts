@@ -381,11 +381,6 @@ ipcMain.handle("set-setting", async (_event: IpcMainInvokeEvent, key: string, va
   saveSettings(settings);
 });
 
-ipcMain.handle("get-initial-recording-state", async (_event: IpcMainInvokeEvent) => {
-  const settings = loadSettings();
-  return settings.recordOnLaunch !== false; // Default to true
-});
-
 ipcMain.handle("take-screenshot", takeScreenshot);
 
 ipcMain.handle("get-current-app", getCurrentApp);
