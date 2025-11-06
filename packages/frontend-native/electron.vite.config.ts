@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import svgr from "vite-plugin-svgr";
 import path from "path";
+import { resolve } from "node:path";
 
 export default defineConfig({
   main: {
@@ -18,7 +19,13 @@ export default defineConfig({
   },
   preload: {
     build: {
-      outDir: "dist/preload"
+      outDir: "dist/preload",
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/preload/index.ts'),
+          sandbox: resolve(__dirname, 'src/preload/sandbox.ts'),
+        }
+      }
     }
   },
   renderer: {

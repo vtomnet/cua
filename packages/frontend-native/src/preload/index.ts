@@ -39,6 +39,12 @@ interface CurrentAppInfo {
   title?: string;
 }
 
+interface JavaScriptExecutionResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // Example IPC
   sendMessage: (msg: string) => ipcRenderer.send('message', msg),
@@ -98,4 +104,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Get current application
   getCurrentApp: (): Promise<CurrentAppInfo> => ipcRenderer.invoke('get-current-app'),
+
+  // Execute JavaScript code
+  executeJavaScript: (code: string): Promise<JavaScriptExecutionResult> => ipcRenderer.invoke('execute-javascript', code),
 });

@@ -27,30 +27,10 @@ interface LLMRequest {
   image?: string;
 }
 
-interface ToolCall {
-  toolName: string;
-  input: Record<string, unknown>;
-}
-
 interface LLMResponse {
-  messages: Message[];
+  code: string;
   finishReason: string;
-}
-
-interface ToolCallPart {
-  type: 'tool-call';
-  toolCallId: string;
-  toolName: string;
-  input: any;
-}
-
-interface ToolResultPart {
-  type: 'tool-result';
-  toolCallId: string;
-  output: {
-    type: 'text';
-    value: string;
-  };
+  usage?: any;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
@@ -80,31 +60,23 @@ const generate = async (requestBody: LLMRequest, signal?: AbortSignal): Promise<
   }
 };
 
-const tools: Record<string, (input: any) => Promise<string>> = {
-  open: async (input: { thing: string }) => {
-    const result = await window.electronAPI.openTool(input);
-    return result.output;
-  },
-  scroll: async (input: { direction?: "up" | "down" | "left" | "right"; distance?: number }) => {
-    const result = await window.electronAPI.scrollTool(input);
-    return result.output;
-  },
-  click: async (input: { x: number; y: number }) => {
-    const result = await window.electronAPI.clickTool(input);
-    return result.output;
-  },
-  keys: async (input: { list: string[] }) => {
-    const result = await window.electronAPI.keysTool(input);
-    return result.output;
-  },
-};
+// Execute JavaScript code in the sandbox
+const executeJavaScriptCode = async (code: string): Promise<{ success: boolean; message?: string }> => {
+  try {
+    const result = await window.electronAPI.executeJavaScript(code);
 
-const handleTool = async (toolPart: ToolCallPart): Promise<string> => {
-  const tool = tools[toolPart.toolName];
-  if (!tool) {
-    throw new Error(`Unknown tool: ${toolPart.toolName}`);
+    if (result.success) {
+      return { success: true, message: result.message || 'Code executed successfully' };
+    } else {
+      const errorMsg = result.error || 'Unknown error';
+      console.error('JavaScript execution error:', errorMsg);
+      return { success: false, message: `Error: ${errorMsg}` };
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error('Failed to execute JavaScript code:', errorMsg);
+    return { success: false, message: `Failed to execute: ${errorMsg}` };
   }
-  return await tool(toolPart.input);
 };
 
 export const runAgent = async (input: string, info: SystemInfo) => {
@@ -151,6 +123,7 @@ export const runAgent = async (input: string, info: SystemInfo) => {
       formattedInfo.currentApp = parts.join(' ');
     }
 
+    // TODO: the finishReason logic is outdated. replace.
     while (true) {
       // Check if cancelled before starting new iteration
       if (signal.aborted) {
@@ -168,48 +141,65 @@ export const runAgent = async (input: string, info: SystemInfo) => {
       console.log("Calling generate with requestBody:", requestBody);
       const response = await generate(requestBody, signal);
 
-      const outputMessages = response.messages;
-      console.log(outputMessages);
+      console.log("Received JavaScript code:", response.code);
+      console.log("Finish reason:", response.finishReason);
+      responseLines.push(`Code:\n${response.code}`);
 
-      let lastPart = null;
+      // Check if cancelled before executing code
+      if (signal.aborted) {
+        throw new AgentCancelledError();
+      }
 
-      for (const message of outputMessages) {
-        responseLines.push(JSON.stringify(message));
-        messages.push(message);
-        for (const part of message.content) {
-          // Check if cancelled before executing tools
-          if (signal.aborted) {
-            throw new AgentCancelledError();
-          }
+      // Execute the JavaScript code
+      const result = await executeJavaScriptCode(response.code);
 
-          if (part.type === 'tool-call') {
-            const output = await handleTool(part);
-            responseLines.push(output);
-            messages.push({
-              role: 'tool',
-              content: [{
-                type: 'tool-result',
-                toolName: part.toolName,
-                toolCallId: part.toolCallId,
-                output: {
-                  type: 'text',
-                  value: output,
-                },
-              }]
-            })
-          } else if (part.type === 'text') {
-            console.log(part.text);
-          } else {
-            console.warn(`Unknown part type: ${part.type}`);
-          }
-          lastPart = part;
+      if (result.success) {
+        const executionMessage = result.message || 'Code executed successfully';
+        responseLines.push(`Execution: ${executionMessage}`);
+        console.log("Execution result:", executionMessage);
+
+        // Add the assistant's code and execution results to messages
+        messages.push({
+          role: 'assistant',
+          content: response.code
+        });
+
+        // Only continue the loop if the model wants to continue (didn't finish naturally)
+        // and the execution was successful
+        if (response.finishReason === 'stop') {
+          // Model indicated it's done
+          responseLines.push("Task complete");
+          break;
         }
+
+        messages.push({
+          role: 'user',
+          content: `Execution: ${executionMessage}`
+        });
+      } else {
+        // Execution failed
+        const errorMessage = result.message || 'Unknown error';
+        responseLines.push(`Execution failed: ${errorMessage}`);
+        console.error("Execution failed:", errorMessage);
+
+        messages.push({
+          role: 'assistant',
+          content: response.code
+        });
+
+        messages.push({
+          role: 'user',
+          content: `Execution failed: ${errorMessage}`
+        });
       }
 
       // timeout for actions to finish happening
       await new Promise(r => setTimeout(r, 1000));
 
-      if (lastPart === null || lastPart.type !== 'tool-call') {
+      // Continue loop to allow for multi-step tasks
+      // Break if we've had too many iterations (safety limit)
+      if (messages.length > 20) {
+        responseLines.push("Reached maximum iteration limit");
         break;
       }
     }

@@ -37,6 +37,12 @@ interface CurrentAppInfo {
   title?: string;
 }
 
+interface JavaScriptExecutionResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+}
+
 interface ElectronAPI {
   sendMessage: (msg: string) => void;
   openTool: (data: OpenToolData) => Promise<ToolResult>;
@@ -57,6 +63,7 @@ interface ElectronAPI {
   setSetting: (key: string, value: any) => Promise<void>;
   getInitialRecordingState: () => Promise<boolean>;
   getCurrentApp: () => Promise<CurrentAppInfo>;
+  executeJavaScript: (code: string) => Promise<JavaScriptExecutionResult>;
 }
 
 declare global {

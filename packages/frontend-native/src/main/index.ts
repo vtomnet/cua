@@ -1,4 +1,16 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, IpcMainEvent, IpcMainInvokeEvent, desktopCapturer, screen } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  Tray,
+  Menu,
+  ipcMain,
+  nativeImage,
+  IpcMainEvent,
+  IpcMainInvokeEvent,
+  desktopCapturer,
+  screen,
+  session,
+} from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
@@ -19,6 +31,7 @@ import micSlashTrayImg from "../assets/microphone-slash-tray.png"
 let tray: Tray | null = null;
 let isRecording = false;
 let controlWindow: BrowserWindow | null = null;
+
 
 // Settings storage
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
@@ -205,6 +218,124 @@ function createControlWindow() {
   });
 }
 
+async function createSandbox() {
+  const partition = 'sandbox:' + Math.random().toString(36).slice(2);
+  const ses = session.fromPartition(partition, { cache: false });
+
+  ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+  ses.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (_d, cb) => cb({ cancel: true }));
+
+  const win = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      partition,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      autoplayPolicy: 'document-user-activation-required',
+      preload: path.join(__dirname, '../preload/sandbox.js'),
+    }
+  });
+
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+  await win.loadURL('about:blank');
+  return win;
+}
+
+// FIXME: security hole: prompt injections possible via app title / webpage title / webpage url. llama-guard?
+const sandboxFns = {
+  open: async (thing: string) => {
+    const result = await openTool({ thing });
+    return result.output;
+  },
+  scroll: async (direction: string, distance: number = 70) => {
+    const result = await scrollTool({
+      direction: direction as "up" | "down" | "left" | "right",
+      distance
+    });
+    return result.output;
+  },
+  click: async (x: number, y: number) => {
+    const result = await clickTool({ x, y });
+    return result.output;
+  },
+  screenshot: async () => {
+    // Screenshot is handled separately in the agent flow
+    return "Screenshot taken";
+  },
+  keys: async (list: string[]) => {
+    const result = await keysTool({ list });
+    return result.output;
+  },
+};
+
+ipcMain.handle('sandbox:call', async (_event, { name, args }) => {
+  const fn = (sandboxFns as any)[name];
+  if (!fn) {
+    throw new Error(`Unknown sandbox function: ${name}`);
+  }
+  // Handle both single argument and multiple arguments
+  if (Array.isArray(args)) {
+    return await fn(...args);
+  } else {
+    return await fn(args);
+  }
+});
+
+async function runSandboxed(code: string, timeoutMs = 60_000) {
+  const win = await createSandbox();
+
+  // Capture console messages from the sandbox
+  win.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`[sandbox] [level:${level}, line:${line}] ${message}`)
+  });
+
+  const src = `
+    (() => {
+      'use strict';
+
+      function open(thing) { return window.sandboxApi.call('open', thing); }
+      function scroll(direction, distance = 70) { return window.sandboxApi.call('scroll', [direction, distance]); }
+      function click(x, y) { return window.sandboxApi.call('click', [x, y]); }
+      function screenshot() { return window.sandboxApi.call('screenshot', []); }
+      function keys(list) { return window.sandboxApi.call('keys', list); }
+
+      ${code}
+    })();
+  `.trim();
+
+  const run = win.webContents.executeJavaScript(src, true);
+  const result = await Promise.race([
+    run,
+    new Promise((_r, reject) => setTimeout(() => reject(new Error("Sandbox timed out")), timeoutMs)),
+  ]).finally(() => {
+    if (!win.isDestroyed()) win.destroy();
+  });
+
+  return result;
+}
+
+// JavaScript sandbox execution
+ipcMain.handle("execute-javascript", async (_event: IpcMainInvokeEvent, code: string) => {
+  console.log("Executing JavaScript code:", code);
+
+  try {
+    await runSandboxed(code);
+    return {
+      success: true,
+      message: "Code executed successfully"
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error('JavaScript execution error:', errorMsg);
+    return {
+      success: false,
+      error: errorMsg
+    };
+  }
+});
 
 ipcMain.handle("open-tool", async (_event: IpcMainInvokeEvent, data: OpenToolData) => {
   console.log("Open tool received from renderer:", data);
