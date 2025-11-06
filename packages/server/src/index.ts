@@ -5,13 +5,13 @@ import dotenv from "dotenv";
 import { generateText, tool, type ModelMessage } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { google } from "@ai-sdk/google";
+import { cerebras } from "@ai-sdk/cerebras";
+import { groq } from "@ai-sdk/groq";
 import { z } from "zod";
 
 dotenv.config({ path: "../../.env" });
 
-// const client = new Cerebras();
-
-const SYSTEM_PROMPT = `
+const systemPrompt = (currentDate: string, currentApp: string) => `
 You are a helpful computer-use assistant.
 
 ## RULES
@@ -22,9 +22,14 @@ You are a helpful computer-use assistant.
 
 ## INFO
 
-The current date and time is ${new Date().toLocaleString()}.
+The current date and time is ${currentDate}.
+The current open application is ${currentApp}.
 The user is using macOS 26 Tahoe on a MacBook Pro.
 The user's location is roughly Merced, CA.
+
+## EXAMPLES
+
+"open hacker news" -> call \`open\` tool with argument https://news.ycombinator.com
 `;
 
 const tools = {
@@ -48,13 +53,17 @@ const tools = {
       y: z.number().int().min(0)
     }),
   }),
+  screenshot: tool({
+    description: "Take a screenshot of the screen. Do this ONLY if necessary.",
+    inputSchema: z.object({}),
+  }),
   // keys: tool({
   //   description: 'Send a list of keypresses. You can use <ctrl>, <shift>, etc. E.g., "<cmd>+c". You may also pass a string of characters to type it, like "Hello world".',
   //   inputSchema: z.object({
   //     list: z.array(z.string()),
   //   }),
   // }),
-}
+};
 
 const app = express();
 const server = http.createServer(app);
@@ -88,7 +97,7 @@ app.use(express.static("public"));
 
 app.post("/generate", async (req, res) => {
   try {
-    const { messages: inputMessages, image } = req.body ?? {};
+    const { info, messages: inputMessages, image } = req.body ?? {};
 
     // Log request size for diagnostics
     const requestSize = JSON.stringify(req.body).length;
@@ -96,6 +105,7 @@ app.post("/generate", async (req, res) => {
     console.log(`Request received - Total size: ${(requestSize / 1024).toFixed(2)}KB, Image size: ${imageSizeKB}KB`);
 
     const messages: ModelMessage[] = [];
+    if (false) // DEBUG
     if (image) messages.push({
       role: "user",
       content: [{
@@ -106,10 +116,13 @@ app.post("/generate", async (req, res) => {
     messages.push(...inputMessages);
 
     console.log(`Sending messages:`, messages);
+    console.log(`System prompt:`, systemPrompt(info.currentDate, info.currentApp));
 
     const result = await generateText({
-      model: anthropic("claude-sonnet-4-5"),
-      system: SYSTEM_PROMPT,
+      // model: anthropic("claude-sonnet-4-5"),
+      // model: groq("meta-llama/llama-4-maverick-17b-128e-instruct"),
+      model: cerebras("gpt-oss-120b"),
+      system: systemPrompt(info.currentDate, info.currentApp),
       messages: messages,
       tools: tools,
     });

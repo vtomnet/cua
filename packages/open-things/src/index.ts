@@ -120,7 +120,11 @@ function normalizeOptions(opts: NormalizeUrlOptions): NormalizeUrlOptions {
 
 export default async function open(things: string | Array<string>): Promise<OpenResult> {
   const thingList = Array.isArray(things) ? things : [things];
-  const normalizedThings = thingList.map(thing => normalizeUrl(thing)).filter(thing => thing !== null) as string[];;
+  let normalizedThings: string[] = [];
+  for (const thing of thingList) {
+    const normalizedThing = normalizeUrl(thing);
+    normalizedThings.push(normalizedThing ?? thing);
+  }
 
   return new Promise((resolve) => {
     execFile("/usr/bin/open", normalizedThings, (error, stdout, stderr) => {

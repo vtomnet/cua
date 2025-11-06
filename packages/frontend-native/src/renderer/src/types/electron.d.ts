@@ -31,6 +31,12 @@ interface KeysToolData {
   list: string[];
 }
 
+interface CurrentAppInfo {
+  name: string;
+  url?: string;
+  title?: string;
+}
+
 interface ElectronAPI {
   sendMessage: (msg: string) => void;
   openTool: (data: OpenToolData) => Promise<ToolResult>;
@@ -47,6 +53,10 @@ interface ElectronAPI {
   resizeControlWindow: (showSettings: boolean) => Promise<{ success: boolean }>;
   onProcessText: (callback: (text: string) => void) => (() => void);
   onRecordingStateUpdate: (callback: (isRecording: boolean) => void) => (() => void);
+  getSetting: (key: string) => Promise<any>;
+  setSetting: (key: string, value: any) => Promise<void>;
+  getInitialRecordingState: () => Promise<boolean>;
+  getCurrentApp: () => Promise<CurrentAppInfo>;
 }
 
 declare global {

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Cursor from "./components/Cursor";
 import ErrorMessage from "./components/ErrorMessage";
 import { useRecorder } from "./record";
@@ -6,6 +6,50 @@ import { transcribe, disconnectTranscription } from "./transcribe";
 import { runAgent, AgentCancelledError } from "./llm";
 
 const App = (): JSX.Element => {
+  const [isRecording, setIsRecording] = useState(false);
+
+  // Load initial recording state from settings
+  useEffect(() => {
+    const loadInitialState = async () => {
+      if (window.electronAPI?.getInitialRecordingState) {
+        try {
+          const shouldRecord = await window.electronAPI.getInitialRecordingState();
+          setIsRecording(shouldRecord);
+
+          // Send initial state to main process
+          if (window.electronAPI?.sendRecordingState) {
+            window.electronAPI.sendRecordingState(shouldRecord);
+          }
+        } catch (error) {
+          console.error('Error loading initial recording state:', error);
+        }
+      }
+    };
+
+    loadInitialState();
+  }, []);
+
+  // Handle toggle recording from main process
+  useEffect(() => {
+    if (!window.electronAPI?.onToggleRecording) return;
+
+    const cleanup = window.electronAPI.onToggleRecording(() => {
+      setIsRecording(prev => {
+        const newState = !prev;
+        console.log(`Recording ${newState ? 'enabled' : 'disabled'}`);
+
+        // Notify main process of the state change
+        if (window.electronAPI?.sendRecordingState) {
+          window.electronAPI.sendRecordingState(newState);
+        }
+
+        return newState;
+      });
+    });
+
+    return cleanup;
+  }, []);
+
   const handleSpeechEnd = async (audioData: Float32Array) => {
     try {
       console.log(`Transcribing ${audioData.length} samples (${(audioData.length / 16000).toFixed(2)}s)`);
@@ -15,7 +59,15 @@ const App = (): JSX.Element => {
 
       if (transcript.trim()) {
         try {
-          await runAgent(transcript);
+          const appInfo = await window.electronAPI?.getCurrentApp() || { name: "Unknown" };
+          const info = {
+            date: new Date().toISOString(),
+            currentApp: appInfo.name,
+            ...(appInfo.url && { url: appInfo.url }),
+            ...(appInfo.title && { title: appInfo.title })
+          };
+          console.log("Context info:", info);
+          await runAgent(transcript, info);
         } catch (error) {
           if (error instanceof AgentCancelledError) {
             console.warn("Agent execution was cancelled by a new invocation");
@@ -38,7 +90,7 @@ const App = (): JSX.Element => {
   };
 
   // Initialize recorder with callbacks
-  const { status, error, isSpeaking } = useRecorder({
+  const { status, error, isSpeaking } = useRecorder(isRecording, {
     onSpeechEnd: handleSpeechEnd,
     onSpeechStart: handleSpeechStart,
     onError: handleError,
@@ -59,7 +111,15 @@ const App = (): JSX.Element => {
       console.log("Processing text from control panel:", text);
       if (text.trim()) {
         try {
-          await runAgent(text);
+          const appInfo = await window.electronAPI?.getCurrentApp() || { name: "Unknown" };
+          const info = {
+            date: new Date().toISOString(),
+            currentApp: appInfo.name,
+            ...(appInfo.url && { url: appInfo.url }),
+            ...(appInfo.title && { title: appInfo.title })
+          };
+          console.log("Context info:", info);
+          await runAgent(text, info);
         } catch (error) {
           if (error instanceof AgentCancelledError) {
             console.warn("Agent execution was cancelled by a new invocation");

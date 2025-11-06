@@ -1,5 +1,7 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, IpcMainEvent, IpcMainInvokeEvent, desktopCapturer, screen } from 'electron';
 import path from 'path';
+import fs from 'fs';
+import { execSync } from 'child_process';
 import robot from '@jitsi/robotjs';
 import {
   openTool,
@@ -17,6 +19,34 @@ import micSlashTrayImg from "../assets/microphone-slash-tray.png"
 let tray: Tray | null = null;
 let isRecording = false;
 let controlWindow: BrowserWindow | null = null;
+
+// Settings storage
+const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+
+interface Settings {
+  recordOnLaunch?: boolean;
+  [key: string]: any;
+}
+
+function loadSettings(): Settings {
+  try {
+    if (fs.existsSync(settingsPath)) {
+      const data = fs.readFileSync(settingsPath, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Error loading settings:', error);
+  }
+  return { recordOnLaunch: true }; // Default settings
+}
+
+function saveSettings(settings: Settings): void {
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('Error saving settings:', error);
+  }
+}
 
 function updateTrayIcon() {
   if (!tray) return;
@@ -258,21 +288,18 @@ ipcMain.handle("resize-control-window", async (_event: IpcMainInvokeEvent, showS
     return { success: false };
   }
 
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
-
   const windowWidth = 400;
   const normalHeight = 180;
   const expandedHeight = 450; // Larger height to accommodate settings
   const newHeight = showSettings ? expandedHeight : normalHeight;
 
-  // Reposition to keep it centered horizontally and at bottom
-  const x = Math.floor((screenWidth - windowWidth) / 2);
-  const y = screenHeight - newHeight - 20; // 20px from bottom
+  // Get current window bounds to preserve position
+  const currentBounds = controlWindow.getBounds();
 
+  // Only resize height, keep x and y position
   controlWindow.setBounds({
-    x,
-    y,
+    x: currentBounds.x,
+    y: currentBounds.y,
     width: windowWidth,
     height: newHeight
   });
@@ -350,6 +377,212 @@ ipcMain.handle("take-screenshot", async (_event: IpcMainInvokeEvent) => {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred"
     };
+  }
+});
+
+ipcMain.handle("get-setting", async (_event: IpcMainInvokeEvent, key: string) => {
+  const settings = loadSettings();
+  return settings[key];
+});
+
+ipcMain.handle("set-setting", async (_event: IpcMainInvokeEvent, key: string, value: any) => {
+  const settings = loadSettings();
+  settings[key] = value;
+  saveSettings(settings);
+});
+
+ipcMain.handle("get-initial-recording-state", async (_event: IpcMainInvokeEvent) => {
+  const settings = loadSettings();
+  return settings.recordOnLaunch !== false; // Default to true
+});
+
+interface CurrentAppInfo {
+  name: string;
+  url?: string;
+  title?: string;
+}
+
+// Helper function to get browser info on macOS
+async function getMacBrowserInfo(appName: string): Promise<CurrentAppInfo> {
+  const result: CurrentAppInfo = { name: appName };
+
+  try {
+    // Map of common browser names to their AppleScript identifiers
+    const browserMap: Record<string, string> = {
+      'Google Chrome': 'Google Chrome',
+      'Chrome': 'Google Chrome',
+      'Safari': 'Safari',
+      'Firefox': 'Firefox',
+      'Microsoft Edge': 'Microsoft Edge',
+      'Edge': 'Microsoft Edge',
+      'Brave Browser': 'Brave Browser',
+      'Brave': 'Brave Browser',
+      'Opera': 'Opera',
+      'Arc': 'Arc',
+    };
+
+    const browserIdentifier = browserMap[appName];
+    if (!browserIdentifier) {
+      return result; // Not a known browser
+    }
+
+    // Try to get URL and title based on browser type
+    if (browserIdentifier === 'Safari') {
+      const script = `
+        tell application "Safari"
+          if (count of windows) > 0 then
+            set currentTab to current tab of front window
+            set tabURL to URL of currentTab
+            set tabTitle to name of currentTab
+            return tabURL & "|||" & tabTitle
+          end if
+        end tell
+      `;
+      const output = execSync(`osascript -e '${script}'`, { encoding: 'utf-8' }).trim();
+      const [url, title] = output.split('|||');
+      if (url) result.url = url;
+      if (title) result.title = title;
+    } else if (browserIdentifier === 'Google Chrome' || browserIdentifier === 'Microsoft Edge' ||
+               browserIdentifier === 'Brave Browser' || browserIdentifier === 'Opera' ||
+               browserIdentifier === 'Arc') {
+      // Chrome, Edge, Brave, Opera, and Arc use similar AppleScript syntax
+      const script = `
+        tell application "${browserIdentifier}"
+          if (count of windows) > 0 then
+            set currentTab to active tab of front window
+            set tabURL to URL of currentTab
+            set tabTitle to title of currentTab
+            return tabURL & "|||" & tabTitle
+          end if
+        end tell
+      `;
+      const output = execSync(`osascript -e '${script}'`, { encoding: 'utf-8' }).trim();
+      const [url, title] = output.split('|||');
+      if (url) result.url = url;
+      if (title) result.title = title;
+    } else if (browserIdentifier === 'Firefox') {
+      // Firefox doesn't have good AppleScript support, try alternative
+      // We can try using the window title which often contains the page title
+      try {
+        const titleScript = 'tell application "System Events" to get title of front window of process "Firefox"';
+        const windowTitle = execSync(`osascript -e '${titleScript}'`, { encoding: 'utf-8' }).trim();
+        if (windowTitle && windowTitle !== 'Firefox') {
+          result.title = windowTitle;
+          // Firefox window titles typically end with " — Mozilla Firefox" or similar
+          result.title = windowTitle.replace(/ [-—] Mozilla Firefox$/, '');
+        }
+      } catch (e) {
+        console.log('Could not get Firefox title:', e);
+      }
+    }
+  } catch (error) {
+    console.log(`Could not get browser info for ${appName}:`, error);
+  }
+
+  return result;
+}
+
+// Helper function to get browser info on Windows
+async function getWindowsBrowserInfo(appName: string): Promise<CurrentAppInfo> {
+  const result: CurrentAppInfo = { name: appName };
+
+  try {
+    // Check if it's a known browser
+    const browsers = ['chrome', 'msedge', 'firefox', 'brave', 'opera', 'iexplore'];
+    const browserName = appName.toLowerCase();
+
+    if (!browsers.some(b => browserName.includes(b))) {
+      return result; // Not a browser
+    }
+
+    // Try to get window title which often contains URL info
+    const script = `Add-Type @"
+      using System;
+      using System.Runtime.InteropServices;
+      using System.Text;
+      public class Win32 {
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")]
+        public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+      }
+"@
+    $hwnd = [Win32]::GetForegroundWindow()
+    $title = New-Object System.Text.StringBuilder 256
+    [Win32]::GetWindowText($hwnd, $title, 256) | Out-Null
+    $title.ToString()`;
+
+    const windowTitle = execSync(`powershell -Command "${script}"`, { encoding: 'utf-8' }).trim();
+
+    if (windowTitle) {
+      result.title = windowTitle;
+      // Clean up browser-specific suffixes
+      result.title = windowTitle
+        .replace(/ - Google Chrome$/, '')
+        .replace(/ - Microsoft Edge$/, '')
+        .replace(/ — Mozilla Firefox$/, '')
+        .replace(/ - Opera$/, '')
+        .replace(/ - Brave$/, '');
+    }
+  } catch (error) {
+    console.log(`Could not get browser info for ${appName}:`, error);
+  }
+
+  return result;
+}
+
+ipcMain.handle("get-current-app", async (_event: IpcMainInvokeEvent): Promise<CurrentAppInfo> => {
+  try {
+    if (process.platform === 'darwin') {
+      // macOS: Use AppleScript to get the frontmost application
+      const script = 'tell application "System Events" to get name of first application process whose frontmost is true';
+      const appName = execSync(`osascript -e '${script}'`, { encoding: 'utf-8' }).trim();
+
+      // Try to get browser info if it's a browser
+      return await getMacBrowserInfo(appName);
+    } else if (process.platform === 'win32') {
+      // Windows: Use PowerShell to get the foreground window
+      const script = `Add-Type @"
+        using System;
+        using System.Runtime.InteropServices;
+        using System.Text;
+        public class Win32 {
+          [DllImport("user32.dll")]
+          public static extern IntPtr GetForegroundWindow();
+          [DllImport("user32.dll")]
+          public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+          [DllImport("user32.dll", SetLastError=true)]
+          public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+        }
+"@
+      $hwnd = [Win32]::GetForegroundWindow()
+      $processId = 0
+      [Win32]::GetWindowThreadProcessId($hwnd, [ref]$processId) | Out-Null
+      $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+      if ($process) { $process.ProcessName } else { "Unknown" }`;
+      const appName = execSync(`powershell -Command "${script}"`, { encoding: 'utf-8' }).trim();
+
+      // Try to get browser info if it's a browser
+      return await getWindowsBrowserInfo(appName);
+    } else if (process.platform === 'linux') {
+      // Linux: Try using xdotool or wmctrl
+      try {
+        const windowId = execSync('xdotool getactivewindow', { encoding: 'utf-8' }).trim();
+        const appName = execSync(`xdotool getwindowname ${windowId}`, { encoding: 'utf-8' }).trim();
+        // For Linux, the window name often includes the title, so use it
+        return { name: appName, title: appName };
+      } catch {
+        // Fallback to wmctrl
+        const output = execSync('wmctrl -lx', { encoding: 'utf-8' });
+        const lines = output.split('\n');
+        const appName = lines[0]?.split(/\s+/)[2] || "Unknown";
+        return { name: appName };
+      }
+    }
+    return { name: "Unknown" };
+  } catch (error) {
+    console.error('Error getting current app:', error);
+    return { name: "Unknown" };
   }
 });
 

@@ -14,8 +14,16 @@ interface Message {
   content: string | Array<any>;
 }
 
+interface SystemInfo {
+  date: string;
+  currentApp: string;
+  url?: string;
+  title?: string;
+}
+
 interface LLMRequest {
   messages: Array<Message>;
+  info: SystemInfo;
   image?: string;
 }
 
@@ -99,7 +107,7 @@ const handleTool = async (toolPart: ToolCallPart): Promise<string> => {
   return await tool(toolPart.input);
 };
 
-export const runAgent = async (input: string) => {
+export const runAgent = async (input: string, info: SystemInfo) => {
   console.log("Running agent with input:", input);
 
   if (!input.trim()) {
@@ -121,12 +129,34 @@ export const runAgent = async (input: string) => {
 
     const responseLines: string[] = [];
 
+    // Format browser info into a readable string if we have URL or title
+    const formattedInfo: SystemInfo = {
+      date: info.date,
+      currentApp: info.currentApp
+    };
+
+    if (info.url || info.title) {
+      // This is a browser with additional info
+      const parts: string[] = [];
+
+      if (info.title) {
+        parts.push(info.title);
+      }
+
+      if (info.url) {
+        parts.push(`(${info.url})`);
+      }
+
+      parts.push(`in ${info.currentApp}`);
+      formattedInfo.currentApp = parts.join(' ');
+    }
+
     while (true) {
       // Check if cancelled before starting new iteration
       if (signal.aborted) {
         throw new AgentCancelledError();
       }
-      const requestBody: LLMRequest = { messages };
+      const requestBody: LLMRequest = { messages, info: formattedInfo };
 
       const screenshotResult = await window.electronAPI.takeScreenshot();
       if (screenshotResult.success && screenshotResult.image) {

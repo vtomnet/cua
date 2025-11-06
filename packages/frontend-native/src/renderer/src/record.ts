@@ -55,13 +55,14 @@ const DEFAULT_CONFIG = {
  * - Audio buffering for context preservation
  * - Automatic cleanup on unmount
  *
+ * @param isRecording - Whether recording should be active
  * @param callbacks - Callbacks for speech events
  * @param config - Optional configuration for recording parameters
  * @returns Recording status, error state, and speaking state
  *
  * @example
  * ```tsx
- * const { status, error, isSpeaking } = useRecorder({
+ * const { status, error, isSpeaking } = useRecorder(true, {
  *   onSpeechEnd: async (audioData) => {
  *     const transcript = await transcribe(audioData);
  *     await runAgent(transcript);
@@ -72,13 +73,13 @@ const DEFAULT_CONFIG = {
  * ```
  */
 export function useRecorder(
+  isRecording: boolean,
   callbacks: RecorderCallbacks,
   config: RecorderConfig = {}
 ): RecorderResult {
   const [status, setStatus] = useState<RecorderStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
 
   // Merge config with defaults
   const fullConfig = { ...DEFAULT_CONFIG, ...config };
@@ -113,9 +114,6 @@ export function useRecorder(
    * Process incoming audio chunks
    */
   const processAudioChunk = (chunk: Float32Array) => {
-    // Don't process audio when muted
-    if (isMuted) return;
-
     // Write to continuous audio buffer (for context preservation)
     if (audioBufferRef.current) {
       audioBufferRef.current.write(chunk);
@@ -333,41 +331,24 @@ export function useRecorder(
     console.log("Recording stopped");
   };
 
-  // Start recording on mount, cleanup on unmount
+  // Start/stop recording based on isRecording prop
   useEffect(() => {
-    startRecording();
+    if (isRecording && status === 'idle') {
+      console.log('Starting recording...');
+      startRecording();
+    } else if (!isRecording && status === 'recording') {
+      console.log('Stopping recording...');
+      stopRecording();
+    }
 
     return () => {
-      stopRecording();
+      // Cleanup on unmount
+      if (status === 'recording') {
+        stopRecording();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty deps - only run once on mount
-
-  // Handle toggle recording from main process
-  useEffect(() => {
-    if (!window.electronAPI?.onToggleRecording) return;
-
-    const cleanup = window.electronAPI.onToggleRecording(() => {
-      setIsMuted(prev => {
-        const newMuted = !prev;
-        console.log(`Recording ${newMuted ? 'muted' : 'unmuted'}`);
-
-        // Notify main process of the state change
-        window.electronAPI.sendRecordingState(!newMuted);
-
-        return newMuted;
-      });
-    });
-
-    return cleanup;
-  }, []);
-
-  // Send initial recording state on mount
-  useEffect(() => {
-    if (status === 'recording' && window.electronAPI?.sendRecordingState) {
-      window.electronAPI.sendRecordingState(!isMuted);
-    }
-  }, [status, isMuted]);
+  }, [isRecording]); // Only depend on isRecording prop
 
   return {
     status,
@@ -375,4 +356,3 @@ export function useRecorder(
     isSpeaking,
   };
 }
-

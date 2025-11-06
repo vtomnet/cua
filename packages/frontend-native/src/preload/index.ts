@@ -33,6 +33,12 @@ interface KeysToolData {
   list: string[];
 }
 
+interface CurrentAppInfo {
+  name: string;
+  url?: string;
+  title?: string;
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // Example IPC
   sendMessage: (msg: string) => ipcRenderer.send('message', msg),
@@ -84,4 +90,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('recording-state-update', listener);
     return () => ipcRenderer.removeListener('recording-state-update', listener);
   },
+
+  // Settings management
+  getSetting: (key: string): Promise<any> => ipcRenderer.invoke('get-setting', key),
+  setSetting: (key: string, value: any): Promise<void> => ipcRenderer.invoke('set-setting', key, value),
+  getInitialRecordingState: (): Promise<boolean> => ipcRenderer.invoke('get-initial-recording-state'),
+
+  // Get current application
+  getCurrentApp: (): Promise<CurrentAppInfo> => ipcRenderer.invoke('get-current-app'),
 });

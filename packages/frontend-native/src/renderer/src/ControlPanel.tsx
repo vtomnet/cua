@@ -4,8 +4,24 @@ import Settings from "./Settings";
 const ControlPanel = (): JSX.Element => {
   const [inputText, setInputText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isRecording, setIsRecording] = useState(true); // Start as true (recording by default)
+  const [isRecording, setIsRecording] = useState(true); // Will be updated based on settings
   const [showSettings, setShowSettings] = useState(false);
+
+  // Load initial recording state from settings
+  useEffect(() => {
+    const loadInitialState = async () => {
+      if (window.electronAPI?.getInitialRecordingState) {
+        try {
+          const shouldRecord = await window.electronAPI.getInitialRecordingState();
+          setIsRecording(shouldRecord);
+        } catch (error) {
+          console.error('Error loading initial recording state:', error);
+        }
+      }
+    };
+
+    loadInitialState();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,6 +85,7 @@ const ControlPanel = (): JSX.Element => {
           onChange={(e) => setInputText(e.target.value)}
           placeholder="Type your message..."
           disabled={isSubmitting}
+          autoFocus
           style={{
             flex: 1,
             padding: "8px 12px",
