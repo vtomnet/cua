@@ -8,29 +8,6 @@ interface ScreenshotResult {
   error?: string;
 }
 
-interface ToolResult {
-  success: boolean;
-  output: string;
-}
-
-interface OpenToolData {
-  thing: string;
-}
-
-interface ScrollToolData {
-  direction?: "up" | "down" | "left" | "right";
-  distance?: number;
-}
-
-interface ClickToolData {
-  x: number;
-  y: number;
-}
-
-interface KeysToolData {
-  list: string[];
-}
-
 interface CurrentAppInfo {
   name: string;
   url?: string;
@@ -45,10 +22,6 @@ interface JavaScriptExecutionResult {
 
 interface ElectronAPI {
   sendMessage: (msg: string) => void;
-  openTool: (data: OpenToolData) => Promise<ToolResult>;
-  scrollTool: (data: ScrollToolData) => Promise<ToolResult>;
-  clickTool: (data: ClickToolData) => Promise<ToolResult>;
-  keysTool: (data: KeysToolData) => Promise<ToolResult>;
   toggleRecording: () => void;
   onToggleRecording: (callback: () => void) => (() => void);
   onCursorUpdate: (callback: (coordinates: { x: number; y: number }) => void) => (() => void);

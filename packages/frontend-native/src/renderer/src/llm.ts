@@ -60,24 +60,9 @@ const generate = async (requestBody: LLMRequest, signal?: AbortSignal): Promise<
   }
 };
 
-// Execute JavaScript code in the sandbox
-const executeJavaScriptCode = async (code: string): Promise<{ success: boolean; message?: string }> => {
-  try {
-    const result = await window.electronAPI.executeJavaScript(code);
-
-    if (result.success) {
-      return { success: true, message: result.message || 'Code executed successfully' };
-    } else {
-      const errorMsg = result.error || 'Unknown error';
-      console.error('JavaScript execution error:', errorMsg);
-      return { success: false, message: `Error: ${errorMsg}` };
-    }
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error('Failed to execute JavaScript code:', errorMsg);
-    return { success: false, message: `Failed to execute: ${errorMsg}` };
-  }
-};
+async function executeJS(code: string) {
+  await window.electronAPI.executeJavaScript(code);
+}
 
 export const runAgent = async (input: string, info: SystemInfo) => {
   console.log("Running agent with input:", input);
@@ -131,12 +116,12 @@ export const runAgent = async (input: string, info: SystemInfo) => {
       }
       const requestBody: LLMRequest = { messages, info: formattedInfo };
 
-      const screenshotResult = await window.electronAPI.takeScreenshot();
-      if (screenshotResult.success && screenshotResult.image) {
-        requestBody.image = `data:image/jpeg;base64,${screenshotResult.image}`;
-      } else {
-        console.warn('Screenshot failed:', screenshotResult.error);
-      }
+      // const screenshotResult = await window.electronAPI.takeScreenshot();
+      // if (screenshotResult.success && screenshotResult.image) {
+      //   requestBody.image = `data:image/jpeg;base64,${screenshotResult.image}`;
+      // } else {
+      //   console.warn('Screenshot failed:', screenshotResult.error);
+      // }
 
       console.log("Calling generate with requestBody:", requestBody);
       const response = await generate(requestBody, signal);
@@ -150,47 +135,22 @@ export const runAgent = async (input: string, info: SystemInfo) => {
         throw new AgentCancelledError();
       }
 
-      // Execute the JavaScript code
-      const result = await executeJavaScriptCode(response.code);
+      messages.push({ role: 'assistant', content: response.code });
+      try {
+        await executeJS(response.code);
 
-      if (result.success) {
-        const executionMessage = result.message || 'Code executed successfully';
-        responseLines.push(`Execution: ${executionMessage}`);
-        console.log("Execution result:", executionMessage);
-
-        // Add the assistant's code and execution results to messages
-        messages.push({
-          role: 'assistant',
-          content: response.code
-        });
-
-        // Only continue the loop if the model wants to continue (didn't finish naturally)
-        // and the execution was successful
+        // Only continue loop if model wants to continue (didn't finish naturally) and execution succeeded
         if (response.finishReason === 'stop') {
-          // Model indicated it's done
           responseLines.push("Task complete");
           break;
         }
 
-        messages.push({
-          role: 'user',
-          content: `Execution: ${executionMessage}`
-        });
-      } else {
-        // Execution failed
-        const errorMessage = result.message || 'Unknown error';
-        responseLines.push(`Execution failed: ${errorMessage}`);
-        console.error("Execution failed:", errorMessage);
+        messages.push({ role: 'user', content: `Executed JS` });
+      } catch {
+        responseLines.push(`Execution failed`);
+        console.error("Execution failed");
 
-        messages.push({
-          role: 'assistant',
-          content: response.code
-        });
-
-        messages.push({
-          role: 'user',
-          content: `Execution failed: ${errorMessage}`
-        });
+        messages.push({ role: 'user', content: `Execution failed` });
       }
 
       // timeout for actions to finish happening
